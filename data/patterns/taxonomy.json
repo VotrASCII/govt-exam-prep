@@ -1,0 +1,250 @@
+{
+  "meta": {
+    "generated_from": "all_ga.json",
+    "total_questions_analyzed": 420,
+    "years": [2023, 2024, 2025],
+    "questions_per_year": {
+      "2023": 150,
+      "2024": 180,
+      "2025": 90
+    }
+  },
+
+  "topic_weights": {
+    "rbi_monetary_policy": {
+      "weight_percent": 23,
+      "questions_to_generate": 18,
+      "description": "RBI Annual Report data, guidelines, payment systems, CBDC, monetary policy, inflation targets, FSR, DPI",
+      "hot_subtopics": [
+        "RBI Annual Report statistics (GNPA, NPA ratios, GDP forecasts)",
+        "RBI Payment Systems (NEFT, RTGS, UPI, CBDC/Digital Rupee)",
+        "RBI Guidelines on banks/NBFCs/HFCs/UCBs",
+        "Monetary Policy Committee decisions, repo rate, inflation target (6% upper tolerance, 3 quarters)",
+        "Financial Stability Report data",
+        "RBI Initiatives and dashboards (Antardrishti, Money Kumar mascot)",
+        "Digital Payments Index (DPI) - Payment Performance has highest weight"
+      ],
+      "year_trend": "Consistently highest weight in all 3 years. 2025 shifted toward static RBI knowledge over current circulars."
+    },
+    "banking_financial_sector": {
+      "weight_percent": 19,
+      "questions_to_generate": 15,
+      "description": "UCBs, NBFCs, SFBs, SEBI regulations, IRDAI, cooperative banks, payment banks, ARCs, SARFAESI",
+      "hot_subtopics": [
+        "UCB tier classification and exposure limits",
+        "NBFC regulations (credit rating, ombudsman thresholds)",
+        "SEBI regulations (TER, demat account limits)",
+        "SARFAESI Act provisions (ARCs)",
+        "Sovereign Gold Bonds rules",
+        "Call Money / Notice Money / Term Money markets",
+        "Priority Sector Lending (PSL) sub-targets",
+        "RBI committees on customer service (Talwar, Goiporia, Damodaran)",
+        "HFC deposit acceptance norms",
+        "INFINET, e-Kuber, CCIL systems"
+      ],
+      "year_trend": "Growing in 2024-25. More static banking knowledge being tested, not just current affairs."
+    },
+    "government_schemes_budget": {
+      "weight_percent": 14,
+      "questions_to_generate": 11,
+      "description": "Union Budget provisions, central government schemes, GST, tax policy, infrastructure projects",
+      "hot_subtopics": [
+        "Union Budget key figures (surcharge rates, GST thresholds, subsidies)",
+        "Housing schemes (PMAY-U with specific subsidy amounts)",
+        "National Monetization Pipeline",
+        "Foreign Trade Policy pillars",
+        "Green National Highways Corridor Project",
+        "S3WAAS platform (NIC)",
+        "GST subsumed taxes",
+        "Small savings schemes (Senior Citizen > Sukanya > NSC returns)"
+      ],
+      "year_trend": "Stable across years. Budget-linked questions peak in exam year after budget announcement."
+    },
+    "international_affairs_organizations": {
+      "weight_percent": 12,
+      "questions_to_generate": 10,
+      "description": "G20, BRICS, SCO, ASEAN, BIMSTEC, bilateral agreements, FTAs, international appointments, global bodies",
+      "hot_subtopics": [
+        "G20 membership, presidency, guest countries",
+        "India's FTAs (signed vs not signed - Brazil not signed)",
+        "Bilateral agreements and declarations (Atlantic Declaration etc.)",
+        "Key international appointments (NATO, UN bodies)",
+        "Membership questions (India NOT member of OECD)",
+        "BIMSTEC-ASEAN overlap countries",
+        "Lithium Triangle (Argentina, Bolivia, Chile)",
+        "Colombo Security Conclave members"
+      ],
+      "year_trend": "High in 2023 (India G20 presidency). Shifted to bilateral/FTA questions in 2024-25."
+    },
+    "economy_trade_data": {
+      "weight_percent": 10,
+      "questions_to_generate": 8,
+      "description": "GDP data, trade figures, WPI, exports, global growth contribution, Twenty Point Programme",
+      "hot_subtopics": [
+        "India GDP growth forecasts (SPF by RBI)",
+        "Merchandise exports (petroleum products = largest share)",
+        "India's global growth contribution (12% of global growth)",
+        "Financial Saving of Household Sector (shares & debentures highest share)",
+        "Commercial banks as govt securities holders (37.5% at end-March 2023)",
+        "Twenty Point Programme quarterly targets",
+        "GNPA ratio trend data"
+      ],
+      "year_trend": "Number-heavy questions. Exact figures matter. RBI Annual Report is the primary source."
+    },
+    "awards_rankings_appointments": {
+      "weight_percent": 8,
+      "questions_to_generate": 6,
+      "description": "International awards, India rankings, key domestic and global appointments",
+      "hot_subtopics": [
+        "International awards to Indian-origin persons",
+        "NIRF rankings (IISc, IIT Madras, St Stephens)",
+        "Brand Finance India top brands",
+        "Randstad Employer Brand Research",
+        "Global Gender Gap Index top countries",
+        "CAG of India's external auditor roles in UN bodies",
+        "Key ministerial portfolios (who holds what)"
+      ],
+      "year_trend": "Consistent across years. Indian-origin international awardees is a reliable topic."
+    },
+    "sports": {
+      "weight_percent": 6,
+      "questions_to_generate": 5,
+      "description": "Olympics, cricket, tennis, badminton, hockey. Mostly recent events + historical milestones.",
+      "hot_subtopics": [
+        "Olympic medals and firsts (Abhinav Bindra - first individual gold, 2008 Beijing)",
+        "Grand Slam winners and records",
+        "ICC Cricket World Cup historical facts",
+        "Badminton titles (BWF Super series levels)",
+        "Paris Olympics 2024 - India's participation",
+        "Target Olympic Podium Scheme amounts",
+        "Sports body kit sponsorships"
+      ],
+      "year_trend": "Olympics year (2024) had more sports questions. Usually 3-5 questions per paper."
+    },
+    "environment_geography": {
+      "weight_percent": 4,
+      "questions_to_generate": 4,
+      "description": "Climate phenomena, biodiversity, physical geography, UNESCO sites, conservation",
+      "hot_subtopics": [
+        "El Nino / Indian Ocean Dipole relationship",
+        "Cyclone naming conventions (North Indian Ocean)",
+        "Top mangrove cover states (West Bengal, Gujarat, Andaman)",
+        "Tiger reserves count (started at 9, currently 53+)",
+        "UNESCO World Heritage Sites in India",
+        "Mountain peaks by country (Anamudi = India, Everest = Nepal)"
+      ],
+      "year_trend": "Relatively stable. Physical geography increased in 2025 paper."
+    },
+    "science_technology": {
+      "weight_percent": 3,
+      "questions_to_generate": 3,
+      "description": "ISRO missions, space news, AI/fintech policy, digital initiatives",
+      "hot_subtopics": [
+        "ISRO facts (first Chairman Dr Vikram Sarabhai, HQ Bengaluru, est. 1969)",
+        "NASA/space news (Olympus Mons on Mars)",
+        "GenAI patents (China leads per WIPO)",
+        "TRAI digital consent (DCA - Digital Consent Acquisition)",
+        "AI-powered insurance/fintech products"
+      ],
+      "year_trend": "Increasing in 2024-25. AI and fintech questions growing."
+    },
+    "static_miscellaneous": {
+      "weight_percent": 1,
+      "questions_to_generate": 2,
+      "description": "HQ locations, founding years, river-continent matching, historical GK",
+      "hot_subtopics": [
+        "Central bank HQ locations (ECB = Frankfurt, est. 1998)",
+        "River-continent matching",
+        "Foundation days of institutes (ICAI = July 1)",
+        "Commemorative coins (75 Rupee coin = no silver)"
+      ],
+      "year_trend": "Appears in 2025 more than earlier years. Treat as bonus, not core focus."
+    }
+  },
+
+  "question_style_distribution": {
+    "fill_in_the_blank": {
+      "weight_percent": 28,
+      "description": "One or two blanks in a factual sentence. Tests exact numbers, names, dates.",
+      "example_pattern": "The Upper Tolerance level of Inflation is ___ and in case of breach for ___ quarters the report has to be submitted by RBI.",
+      "writing_instructions": "Include exact figures in the correct option. Wrong options should be plausibly close numbers. Never use round numbers that are too obvious.",
+      "trap_pattern": "Options differ by small margins (e.g. 6.0% vs 6.2% vs 5.9%). Student must know precise figure."
+    },
+    "direct_factual": {
+      "weight_percent": 22,
+      "description": "Which country/person/organization did X. Short, direct.",
+      "example_pattern": "Which country has filed maximum number of GenAI patents as per WIPO?",
+      "writing_instructions": "Question stem should reference a specific report/event/date. Options should include plausible distractors from the same category.",
+      "trap_pattern": "Include USA/UK/India as distractors even when answer is China or less expected country."
+    },
+    "statement_correct_incorrect": {
+      "weight_percent": 18,
+      "description": "2-3 statements given. Find which is/are correct or incorrect.",
+      "example_pattern": "Consider the following statements about X: 1. [stmt] 2. [stmt] 3. [stmt]. Which is/are correct?",
+      "writing_instructions": "Make 2 statements correct and 1 wrong OR 1 correct and 2 wrong. The wrong statement should have a subtly wrong number or fact. Options: A. Only 1, B. Only 2, C. 1 and 2, D. 2 and 3, E. All of the above",
+      "trap_pattern": "Option E (All of the above) is correct more often than students expect."
+    },
+    "not_odd_one_out": {
+      "weight_percent": 15,
+      "description": "Which is NOT a member/feature/part of X. Tests exclusions.",
+      "example_pattern": "India is NOT a member of which of the following?",
+      "writing_instructions": "Use NOT in capitals or bold. The correct answer (the odd one out) should be a commonly confused entity. E.g. OECD (India not member), Brazil (India FTA not signed).",
+      "trap_pattern": "Include 'None of the above' as option E which is wrong — all others are genuinely members/features."
+    },
+    "multiple_statements_select": {
+      "weight_percent": 12,
+      "description": "4-5 items listed as 1,2,3,4. Select correct combination.",
+      "example_pattern": "Which of the following States are among top 3 with highest mangrove cover? 1. WB 2. Gujarat 3. A&N 4. TN — A.1,2&3 B.Only 2&3...",
+      "writing_instructions": "Options should be combinations like: A.1,2&3  B.2,3&4  C.1&3 only  D.3&4 only  E.All of the above. Make correct answer include 3 items usually.",
+      "trap_pattern": "'All of the above' or the largest combination is frequently correct."
+    },
+    "match_the_following": {
+      "weight_percent": 5,
+      "description": "List I matched with List II. Tests association of pairs.",
+      "example_pattern": "Match the tiers of UCBs (List I) with loan limits (List II). Select correct code.",
+      "writing_instructions": "Always 4 pairs. Options show 4 codes like A. 1-D,2-A,3-B,4-C. Make one option have 2 pairs swapped. Option E should be 'None of the above'.",
+      "trap_pattern": "One of the middle options has 3 correct and 1 wrong — student must check all 4."
+    }
+  },
+
+  "critical_format_rules": {
+    "options_count": "ALWAYS 5 options (A, B, C, D, E). Never 4. This is non-negotiable for RBI Grade B.",
+    "option_e_patterns": [
+      "None of the above",
+      "All of the above",
+      "Both A & B",
+      "1, 2 and 3",
+      "E. None of these"
+    ],
+    "question_stem_patterns": [
+      "Start with 'Recently,' for current affairs questions",
+      "Reference specific reports (RBI Annual Report 2023-24, FSR, SPF)",
+      "Include year in the question stem when relevant",
+      "Use 'Which of the following' as the most common opener",
+      "Long context paragraph before the actual question for complex topics"
+    ],
+    "number_questions_rule": "For fill-in-the-blank with numbers, options must be close to each other. Never obvious. E.g. 5.7%, 5.9%, 6.0%, 6.1%, 6.2% — not 5%, 10%, 15%, 20%, 25%.",
+    "distractor_quality": "Wrong options must be plausible entities from the same category. E.g. if answer is NABARD, distractors should be SIDBI, NHB, MUDRA, RBI — not random unrelated bodies."
+  },
+
+  "high_priority_topics_for_current_year": {
+    "note": "These are perennial high-weight areas that will ALWAYS have questions regardless of year",
+    "must_prepare": [
+      "RBI Annual Report key statistics for the latest year",
+      "Latest FSR (Financial Stability Report) data — GNPA ratio trend",
+      "Recent RBI circulars on UCBs, NBFCs, HFCs",
+      "Monetary Policy Committee decisions — current repo rate, inflation band",
+      "Digital Rupee (e-Rupee) latest updates",
+      "India's latest GDP growth forecast",
+      "Recent India FTAs and bilateral deals",
+      "India's position in major international indices",
+      "Latest Union Budget key figures",
+      "Recent major government schemes with specific outlay amounts"
+    ]
+  },
+
+  "pipeline_prompt_instructions": {
+    "usage": "Paste this block into the Groq/Gemini system prompt in daily_runner.py to make generated questions match actual exam pattern.",
+    "inject_into_prompt": "Generate exactly 15 MCQs strictly following RBI Grade B Phase 1 GA exam pattern:\n\nTOPIC DISTRIBUTION (generate this many questions per topic):\n- RBI & Monetary Policy: 4 questions\n- Banking & Financial Sector: 3 questions\n- Government Schemes & Budget: 2 questions\n- International Affairs & Organizations: 2 questions\n- Economy & Trade Data: 2 questions\n- Awards/Rankings/Appointments: 1 question\n- Sports/Environment/Science: 1 question\n\nQUESTION STYLE DISTRIBUTION:\n- Fill in the blank (exact numbers/names): 4-5 questions\n- Direct factual (who/what/where): 3-4 questions\n- Statement correct/incorrect (2-3 statements): 3 questions\n- NOT/odd one out: 2 questions\n- Multiple statements select combination: 2 questions\n- Match the following: 1 question\n\nCRITICAL FORMAT RULES:\n1. ALWAYS use 5 options: A, B, C, D, E — NEVER 4\n2. Option E must often be: None of the above / All of the above / Both A & B / 1,2 and 3\n3. For number-based fill-in-blank: options must be close to each other (e.g. 5.7%, 5.9%, 6.0%, 6.1%, 6.2%)\n4. Start current affairs questions with 'Recently,'\n5. Reference specific reports (RBI Annual Report, FSR, Union Budget) in question stems\n6. Wrong options must be plausible entities from the same category\n7. Format strictly as:\nQ[N]. [Question text]\nA. [option] B. [option] C. [option] D. [option] E. [option]\nAnswer: [letter]\n\nBase all questions strictly on the content provided for this month. Do not invent facts."
+  }
+}
