@@ -81,20 +81,26 @@ def _first_text(item: ET.Element, *names: str) -> str | None:
     return None
 
 
-def _parse_feed(content: bytes, source: str) -> list[dict]:
+def _parse_feed(content: bytes, source: str, gnews: bool = False) -> list[dict]:
     try:
         root = ET.fromstring(content)
     except ET.ParseError:
         return []
 
     items: list[dict] = []
+    suffix = f" - {source}"
     for el in root.iter():
         if _localname(el.tag) not in {"item", "entry"}:
             continue
         title = _clean_text(_first_text(el, "title"), max_chars=240)
+        # Google-News search feeds append " - <Publisher>" to every headline.
+        if gnews and title.endswith(suffix):
+            title = title[: -len(suffix)].rstrip()
         link = _first_text(el, "link", "guid")
         date = _parse_date(_first_text(el, "pubDate", "published", "updated", "date"))
-        summary = _clean_text(_first_text(el, "description", "summary", "content"))
+        # Google-News descriptions are just lists of related links, not real
+        # blurbs — drop them so the LLM rewrites the summary from the headline.
+        summary = "" if gnews else _clean_text(_first_text(el, "description", "summary", "content"))
         if not title or not link:
             continue
         items.append({
@@ -122,7 +128,8 @@ def scrape_news(feeds: dict[str, list[str]] | None = None) -> list[dict]:
             except requests.RequestException as e:
                 print(f"  [WARN] {source} feed failed ({url}): {e}")
                 continue
-            parsed = _parse_feed(resp.content, source)
+            gnews = "news.google.com" in url
+            parsed = _parse_feed(resp.content, source, gnews=gnews)
             print(f"  {source}: {len(parsed)} items from {url.rsplit('/', 1)[-1]}")
             source_items.extend(parsed)
         collected.extend(source_items[:NEWS_MAX_PER_SOURCE])

@@ -19,7 +19,7 @@ import re
 import shutil
 import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,6 +27,7 @@ sys.path.insert(0, str(BASE_DIR))
 
 from config import (  # noqa: E402
     DEFAULT_EXAM,
+    NEWS_HEADLINE_DAYS,
     active_exams,
     current_cycle_start,
     cycle_label,
@@ -767,11 +768,31 @@ def _news_card(item: dict) -> str:
       </article>"""
 
 
+def _split_news(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Partition items into (today + yesterday) and (rest of the week)."""
+    cutoff = date.today() - timedelta(days=NEWS_HEADLINE_DAYS)
+    recent, earlier = [], []
+    for it in items:
+        raw = it.get("date")
+        try:
+            d = datetime.strptime(raw, "%Y-%m-%d").date() if raw else None
+        except ValueError:
+            d = None
+        # Undated items are treated as fresh (matches the digest's lookback rule).
+        if d is None or d >= cutoff:
+            recent.append(it)
+        else:
+            earlier.append(it)
+    return recent, earlier
+
+
 def render_news(news: dict) -> str:
     items = news.get("items", [])
     exams = news.get("exams", list(EXAM_ABBR.keys()))
     sources = news.get("sources", [])
     generated = news.get("generated", "")[:10]
+
+    recent, earlier = _split_news(items)
 
     filters = '<button class="filter active" data-exam="all" type="button">All</button>'
     filters += "".join(
@@ -779,7 +800,21 @@ def render_news(news: dict) -> str:
         for e in exams
     )
 
-    cards = "".join(_news_card(it) for it in items)
+    recent_cards = "".join(_news_card(it) for it in recent) or (
+        '<p class="news-empty">No fresh items in the last two days — '
+        'check <em>In this week</em> below.</p>'
+    )
+
+    if earlier:
+        earlier_cards = "".join(_news_card(it) for it in earlier)
+        week_block = f"""
+    <details class="news-week reveal">
+      <summary>In this week <span class="nw-count">{len(earlier)}</span></summary>
+      <div class="news-list" id="news-week-list">{earlier_cards}
+      </div>
+    </details>"""
+    else:
+        week_block = ""
 
     head = _head(
         f"In the news — {SITE_TITLE}",
@@ -795,9 +830,11 @@ def render_news(news: dict) -> str:
     <h1 class="display reveal">In the<br><em>news</em>.</h1>
     <p class="lede reveal">Concise, exam-focused summaries of the business &amp; economy news that
     matters — each written in-house, tagged with the exams it's relevant to, and credited to
-    the outlet that reported it. Everything you need to read is right here.</p>
+    the outlet that reported it. The headline list shows the last two days; the rest of the
+    week is tucked into <em>In this week</em>.</p>
     <div class="hero-meta reveal">
-      <span><b>{len(items)}</b> items</span>
+      <span><b>{len(recent)}</b> today &amp; yesterday</span>
+      <span><b>{len(earlier)}</b> earlier this week</span>
       <span>{_escape(', '.join(sources))}</span>
       <span class="hero-latest">Updated {_escape(generated)}</span>
     </div>
@@ -805,8 +842,8 @@ def render_news(news: dict) -> str:
 
   <section class="news">
     <div class="news-filters reveal" id="news-filters">{filters}</div>
-    <div class="news-list" id="news-list">{cards}
-    </div>
+    <div class="news-list" id="news-list">{recent_cards}
+    </div>{week_block}
     <p class="news-disclaimer reveal">Summaries are written in-house from facts reported in the
     publishers' public RSS feeds and are credited to the originating outlet. Underlying facts
     belong to their reporting; no full articles are reproduced.</p>

@@ -49,8 +49,9 @@ RBI_PRESS_URL = (
 
 # ── News pipeline (RSS-based) ──────────────────────────────────────────────
 # Only RSS metadata (headline, link, date, short summary) is ingested — never
-# full copyrighted article bodies. Business Standard is excluded: it blocks
-# automated access (Akamai 403) and is hard-paywalled.
+# full copyrighted article bodies. Business Standard blocks direct RSS access
+# (Akamai 403), so it is ingested via a Google-News site-restricted feed, which
+# returns BS headlines that link back to the original Business Standard article.
 NEWS_FEEDS = {
     "Economic Times": [
         "https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms",
@@ -64,6 +65,9 @@ NEWS_FEEDS = {
     ],
     "Hindustan Times": [
         "https://www.hindustantimes.com/feeds/rss/business/rssfeed.xml",
+    ],
+    "Business Standard": [
+        "https://news.google.com/rss/search?q=site:business-standard.com+when:7d&hl=en-IN&gl=IN&ceid=IN:en",
     ],
 }
 
@@ -102,10 +106,14 @@ YOJANA_PAGE = "https://www.yojana.gov.in/"
 STATIC_MAX_WORDS = 16_000
 STATIC_MAX_PAGES_PER_PDF = 220
 
-# How many days back to include in a news digest, and the cap per source.
-# 1 => today + yesterday only (a rolling 2-day window): anything that didn't
-# make yesterday's digest surfaces today, and stale items roll off the next day.
-NEWS_LOOKBACK_DAYS = 1
+# How many days back the digest fetches, and the cap per source.
+# The digest stores a rolling week of items; the site then splits them:
+#   * the main "In the news" list shows only the last NEWS_HEADLINE_DAYS+1 days
+#     (today + yesterday) — anything that didn't make yesterday's list surfaces
+#     today, and stale items roll off the next day;
+#   * a collapsible "In this week" section holds the rest of the week's items.
+NEWS_LOOKBACK_DAYS = 7
+NEWS_HEADLINE_DAYS = 1
 NEWS_MAX_PER_SOURCE = 40
 
 FUZZY_THRESHOLD = 0.85

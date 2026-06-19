@@ -457,6 +457,24 @@ ul.facts li strong{color:var(--ink);font-weight:600}
   font-family:'JetBrains Mono',monospace;font-size:.64rem;color:var(--muted);
   white-space:nowrap;font-style:italic;
 }
+.news-empty{
+  grid-column:1/-1;background:var(--bg);padding:1.6rem 1.4rem;
+  color:var(--ink-soft);font-size:.95rem;
+}
+.news-week{margin-top:1.4rem;border-top:1px solid var(--line)}
+.news-week summary{
+  list-style:none;cursor:pointer;display:flex;align-items:center;gap:.6rem;
+  padding:1.1rem 0 .9rem;
+  font-family:'JetBrains Mono',monospace;font-size:.78rem;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--ink);
+}
+.news-week summary::-webkit-details-marker{display:none}
+.news-week summary::before{content:"+";color:var(--accent);font-size:1rem}
+.news-week[open] summary::before{content:"–"}
+.nw-count{
+  font-size:.66rem;color:var(--muted);border:1px solid var(--line);
+  border-radius:2px;padding:.12rem .4rem;
+}
 .news-disclaimer{
   color:var(--muted);font-size:.78rem;line-height:1.5;
   margin-top:1.6rem;max-width:70ch;
@@ -501,7 +519,8 @@ JS = r"""(() => {
   const filterBar = document.getElementById('news-filters');
   const newsList = document.getElementById('news-list');
   if (filterBar && newsList) {
-    const cards = Array.from(newsList.querySelectorAll('.news-card'));
+    // Cover both the headline list and the collapsible "In this week" list.
+    const cards = Array.from(document.querySelectorAll('.news-card'));
     filterBar.addEventListener('click', (e) => {
       const btn = e.target.closest('.filter');
       if (!btn) return;

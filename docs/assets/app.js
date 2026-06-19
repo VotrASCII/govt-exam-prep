@@ -28,7 +28,8 @@
   const filterBar = document.getElementById('news-filters');
   const newsList = document.getElementById('news-list');
   if (filterBar && newsList) {
-    const cards = Array.from(newsList.querySelectorAll('.news-card'));
+    // Cover both the headline list and the collapsible "In this week" list.
+    const cards = Array.from(document.querySelectorAll('.news-card'));
     filterBar.addEventListener('click', (e) => {
       const btn = e.target.closest('.filter');
       if (!btn) return;
