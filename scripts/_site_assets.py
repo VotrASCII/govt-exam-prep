@@ -156,6 +156,35 @@ main{max-width:var(--max);margin:0 auto;padding:0 clamp(1.25rem,5vw,3.5rem)}
   color:var(--ink-soft);font-style:italic;
 }
 
+/* ---- reference sources (Economic Survey, …) ---- */
+.reference{margin-top:1rem}
+.src-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:1rem;margin-top:1.6rem;
+}
+.src-card{
+  display:flex;flex-direction:column;gap:.45rem;
+  padding:1.4rem 1.4rem 1.2rem;border:1px solid var(--line);border-radius:.5rem;
+  background:var(--bg-2);text-decoration:none;color:var(--ink);
+  transition:transform .35s var(--ease),border-color .35s var(--ease),box-shadow .35s var(--ease);
+}
+.src-card:hover{transform:translateY(-3px);border-color:var(--accent);
+  box-shadow:0 12px 30px -18px rgba(0,0,0,.35)}
+.src-kind{
+  font-family:'JetBrains Mono',monospace;font-size:.66rem;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--accent);
+}
+.src-key{font-family:'Instrument Serif',serif;font-size:1.7rem;font-weight:400;line-height:1}
+.src-meta{
+  font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--ink-soft);
+  margin-top:.2rem;
+}
+.src-go{
+  font-family:'JetBrains Mono',monospace;font-size:.78rem;color:var(--ink);
+  margin-top:.4rem;padding-top:.7rem;border-top:1px solid var(--line-soft);
+}
+.src-card:hover .src-go{color:var(--accent)}
+
 /* ---- data tables (model sometimes emits markdown tables) ---- */
 .table-wrap{overflow-x:auto;margin:1rem 0}
 .data-table{
@@ -627,4 +656,16 @@ JS = r"""(() => {
   if (resetBtn) resetBtn.addEventListener('click', render);
   render();
 })();
+"""
+
+# Minimalist favicon (SVG, font-independent so it stays crisp at 16px): an ink
+# rounded square with two paper "summary lines" and a shorter terracotta
+# "highlighted" line — echoing the site (weekly summaries, highlighted key facts)
+# and its brand accent. Palette matches the CSS (--bg / --ink / --accent).
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Govt Exams GA">
+  <rect width="64" height="64" rx="14" fill="#1b1a17"/>
+  <rect x="15" y="21" width="34" height="5" rx="2.5" fill="#f3f1ea"/>
+  <rect x="15" y="31" width="34" height="5" rx="2.5" fill="#f3f1ea"/>
+  <rect x="15" y="41" width="20" height="5" rx="2.5" fill="#9c4221"/>
+</svg>
 """

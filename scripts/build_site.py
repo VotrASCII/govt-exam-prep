@@ -40,6 +40,12 @@ DOCS_DIR = BASE_DIR / "docs"
 ASSETS_DIR = DOCS_DIR / "assets"
 WEEKS_DIR = DOCS_DIR / "weeks"
 EXAMS_PAGE_DIR = DOCS_DIR / "exams"
+STATIC_PAGE_DIR = DOCS_DIR / "static"
+
+STATIC_KIND_LABEL = {
+    "economic-survey": "Economic Survey",
+    "yojana": "Yojana",
+}
 
 SITE_TITLE = "Govt Exams · Weekly GA"
 SITE_TAGLINE = "Current affairs for India's top government exams, distilled week by week."
@@ -124,11 +130,37 @@ class Cycle:
 
 
 @dataclass
+class StaticSource:
+    """A yearly/monthly reference source (e.g. Economic Survey) with its own
+    section-wise summary and a dedicated quiz, shown separately from weeks."""
+    slug: str
+    kind: str
+    key: str
+    stem: str
+    sections: list[Section]
+    questions: list[dict]
+    note: str | None
+
+    @property
+    def label(self) -> str:
+        return f"{STATIC_KIND_LABEL.get(self.kind, self.kind.title())} {self.key}"
+
+    @property
+    def page_name(self) -> str:
+        return f"{self.stem}.html"
+
+    @property
+    def topic_count(self) -> int:
+        return sum(1 for s in self.sections if s.blocks)
+
+
+@dataclass
 class ExamGroup:
     slug: str
     cfg: dict
     weeks: list[Week] = field(default_factory=list)
     cycles: list[Cycle] = field(default_factory=list)
+    sources: list[StaticSource] = field(default_factory=list)
 
     @property
     def current(self) -> "Cycle | None":
@@ -368,6 +400,31 @@ def load_weeks(slug: str = DEFAULT_EXAM) -> list[Week]:
     return weeks
 
 
+def load_static_sources(slug: str) -> list[StaticSource]:
+    """Load stored reference sources (Economic Survey, …) for an exam."""
+    from pipeline.static_sources import list_sources
+
+    out: list[StaticSource] = []
+    for s in list_sources(slug):
+        if not s["summary_md"].strip():
+            continue
+        sections, note = parse_summary(s["summary_md"])
+        if not sections:
+            continue
+        out.append(
+            StaticSource(
+                slug=slug,
+                kind=s["kind"],
+                key=s["key"],
+                stem=s["stem"],
+                sections=sections,
+                questions=s["questions"],
+                note=note,
+            )
+        )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # HTML rendering
 # ---------------------------------------------------------------------------
@@ -380,6 +437,7 @@ def _head(title: str, root: str, description: str) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_escape(title)}</title>
 <meta name="description" content="{_escape(description)}">
+<link rel="icon" type="image/svg+xml" href="{root}assets/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -596,6 +654,7 @@ def render_exam_page(group: "ExamGroup") -> str:
     </div>
     {main_body}
   </section>
+{_sources_section(group, "../")}
 {archive_html}
 </main>
 {_footer("../")}"""
@@ -703,6 +762,90 @@ def render_week(
 {quiz_html}
 
   <nav class="week-pager reveal">{''.join(pager)}</nav>
+</main>
+<script id="quiz-data" type="application/json">{quiz_data}</script>
+{_footer(root)}"""
+
+
+def _source_card(source: StaticSource, root: str) -> str:
+    kind_label = STATIC_KIND_LABEL.get(source.kind, source.kind.title())
+    return f"""
+      <a class="src-card reveal" href="{root}static/{source.slug}/{source.page_name}">
+        <span class="src-kind">{_escape(kind_label)}</span>
+        <span class="src-key">{_escape(source.key)}</span>
+        <span class="src-meta">{source.topic_count} sections · {len(source.questions)} questions</span>
+        <span class="src-go">Open →</span>
+      </a>"""
+
+
+def _sources_section(group: "ExamGroup", root: str) -> str:
+    if not group.sources:
+        return ""
+    cards = "".join(_source_card(s, root) for s in group.sources)
+    return f"""
+  <section id="reference" class="reference">
+    <div class="section-head reveal">
+      <span class="sh-num">02</span>
+      <h2>Reference sources</h2>
+      <p>Foundational, exam-critical reading (e.g. the Economic Survey) — each with its
+      own section-wise summary and a dedicated quiz, kept separate from the weekly papers.</p>
+    </div>
+    <div class="src-grid">{cards}
+    </div>
+  </section>"""
+
+
+def render_static_page(source: StaticSource, cfg: dict) -> str:
+    exam_name = cfg["name"]
+    sections_html = "".join(
+        _render_section(i, s) for i, s in enumerate(source.sections, 1)
+    )
+    note_html = (
+        f'<p class="provenance reveal">{source.note}</p>' if source.note else ""
+    )
+
+    quiz_html = ""
+    if source.questions:
+        quiz_html = f"""
+  <section id="practice" class="practice">
+    <div class="section-head reveal">
+      <span class="sh-num">★</span>
+      <h2>Practice</h2>
+      <p>{len(source.questions)} exam-style questions drawn from {_escape(source.label)}.
+      Pick an answer to check it.</p>
+    </div>
+    <div class="quiz reveal" id="quiz">
+      <div class="quiz-bar">
+        <div class="quiz-progress"><span id="quiz-progress-fill"></span></div>
+        <div class="quiz-score" id="quiz-score">0 / {len(source.questions)} answered</div>
+        <button class="quiz-reset" id="quiz-reset" type="button">Reset</button>
+      </div>
+      <div id="quiz-questions"></div>
+    </div>
+  </section>"""
+
+    quiz_data = json.dumps(source.questions, ensure_ascii=False)
+    root = "../../"
+    head = _head(
+        f"{exam_name} · {source.label} — {SITE_TITLE}",
+        root,
+        f"{exam_name} {source.label}: section-wise summary and a dedicated practice quiz.",
+    )
+    return f"""{head}
+<body class="week-page">
+{_nav(root, active=cfg['slug'])}
+<main class="week-main">
+  <a class="back-link reveal" href="{root}exams/{cfg['slug']}.html">← All {_escape(exam_name)} material</a>
+  <header class="week-head">
+    <p class="eyebrow reveal">{_escape(exam_name)} · Reference source</p>
+    <h1 class="display reveal">{_escape(source.label)}</h1>
+    <p class="lede reveal">{source.topic_count} sections summarised · {len(source.questions)} dedicated questions</p>
+  </header>
+
+  <div class="summary">{sections_html}
+    {note_html}
+  </div>
+{quiz_html}
 </main>
 <script id="quiz-data" type="application/json">{quiz_data}</script>
 {_footer(root)}"""
@@ -861,19 +1004,26 @@ def build() -> None:
     for slug, cfg in active_exams().items():
         weeks = load_weeks(slug)
         groups.append(
-            ExamGroup(slug=slug, cfg=cfg, weeks=weeks, cycles=group_into_cycles(weeks))
+            ExamGroup(
+                slug=slug,
+                cfg=cfg,
+                weeks=weeks,
+                cycles=group_into_cycles(weeks),
+                sources=load_static_sources(slug),
+            )
         )
 
     total_weeks = sum(len(g.weeks) for g in groups)
-    if total_weeks == 0:
-        print("No weekly summaries found for any active exam — nothing to build.")
+    total_sources = sum(len(g.sources) for g in groups)
+    if total_weeks == 0 and total_sources == 0:
+        print("No weekly summaries or reference sources found — nothing to build.")
         return
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     EXAMS_PAGE_DIR.mkdir(parents=True, exist_ok=True)
-    # Fresh weeks + exams dirs each build so removed content doesn't linger.
-    for d in (WEEKS_DIR, EXAMS_PAGE_DIR):
+    # Fresh weeks + exams + static dirs each build so removed content doesn't linger.
+    for d in (WEEKS_DIR, EXAMS_PAGE_DIR, STATIC_PAGE_DIR):
         if d.exists():
             shutil.rmtree(d)
         d.mkdir(parents=True, exist_ok=True)
@@ -885,6 +1035,14 @@ def build() -> None:
         (EXAMS_PAGE_DIR / f"{group.slug}.html").write_text(
             render_exam_page(group), encoding="utf-8"
         )
+        # Reference-source pages (Economic Survey, …): own summary + dedicated quiz.
+        if group.sources:
+            exam_static_dir = STATIC_PAGE_DIR / group.slug
+            exam_static_dir.mkdir(parents=True, exist_ok=True)
+            for source in group.sources:
+                (exam_static_dir / source.page_name).write_text(
+                    render_static_page(source, group.cfg), encoding="utf-8"
+                )
         if not group.weeks:
             continue
         # Week detail pages: build every week (current + archived). Chronological
@@ -911,9 +1069,14 @@ def build() -> None:
         f"{f' (+{sum(len(c.weeks) for c in g.archived)} archived)' if g.archived else ''}"
         for g in groups
     )
-    print(f"Built {len(groups)} exam pages + {total_weeks} week pages → {DOCS_DIR.relative_to(BASE_DIR)}")
+    print(
+        f"Built {len(groups)} exam pages + {total_weeks} week pages + "
+        f"{total_sources} reference-source pages → {DOCS_DIR.relative_to(BASE_DIR)}"
+    )
     print(f"  {summary_bits}")
-    print(f"  Practice questions: {sum(len(w.questions) for g in groups for w in g.weeks):,}")
+    week_q = sum(len(w.questions) for g in groups for w in g.weeks)
+    src_q = sum(len(s.questions) for g in groups for s in g.sources)
+    print(f"  Practice questions: {week_q:,} weekly + {src_q:,} reference = {week_q + src_q:,}")
     if news:
         print(f"  News digest: {news['count']} items → docs/news.html")
     else:
@@ -923,10 +1086,11 @@ def build() -> None:
 def write_assets() -> None:
     (ASSETS_DIR / "style.css").write_text(CSS, encoding="utf-8")
     (ASSETS_DIR / "app.js").write_text(JS, encoding="utf-8")
+    (ASSETS_DIR / "favicon.svg").write_text(FAVICON_SVG, encoding="utf-8")
 
 
 # CSS and JS live at the bottom for readability; defined in companion module.
-from _site_assets import CSS, JS  # noqa: E402  (local build-time asset strings)
+from _site_assets import CSS, FAVICON_SVG, JS  # noqa: E402  (build-time asset strings)
 
 
 if __name__ == "__main__":
