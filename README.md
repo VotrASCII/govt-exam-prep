@@ -1,17 +1,55 @@
-# RBI Grade B Phase 1 — GA Prep Tool
+# Govt Exams — GA Prep Tool
 
-Automated scraper and AI study assistant for RBI Grade B Phase 1 General Awareness.
+Automated scraper and AI study assistant for the General Awareness papers of
+India's top government exams. Built first for **RBI Grade B Phase 1**, now being
+generalised to a **multi-exam** platform (UPSC / Banking next, then SEBI Grade A
+and NABARD Grade A).
 
 **Live site:** https://votrascii.github.io/grade-b-prep/
 
 ## What it does
 
 1. **Scrapes past GA questions** (2023–2025) from EduTap, AffairsCloud, and Oliveboard
-2. **Scrapes PIB press releases** and **RBI circulars** with local caching
-3. **Generates AI summaries + practice MCQs** for weekly or monthly periods using Ollama
+2. **Scrapes each exam's own sources** — PIB press releases and RBI circulars for RBI
+   Grade B; broad all-ministry PIB and the Economic Survey for UPSC / Banking — with
+   local caching
+3. **Generates AI summaries + practice MCQs** for weekly or monthly periods using Ollama,
+   with the topic and question-type mix tuned per exam (see *Multi-exam architecture*)
 4. **Schedules itself** to process one completed week every 6 hours
-5. **Publishes a minimalist weekly website** ([live here](https://votrascii.github.io/grade-b-prep/)) with descriptive summaries and an in-browser practice quiz
-6. **Curates exam-relevant news** from ET / Mint / Hindustan Times (via RSS), tagged by exam and cited back to the source
+5. **Publishes a minimalist website** ([live here](https://votrascii.github.io/grade-b-prep/))
+   **categorised by exam**, each with descriptive summaries and an in-browser practice quiz
+6. **Curates exam-relevant news** from ET / Mint / Hindustan Times (via RSS), tagged by
+   exam and shown as self-contained summaries (rolling 2-day window)
+
+## Multi-exam architecture
+
+Every exam is declared once in `config.py` under the `EXAMS` registry — its display
+name, the **sources** it draws on, its **taxonomy** file, and an `active` flag. The
+pipeline, prompt builder, and website all read this registry, so adding an exam means
+appending an entry (plus its scraper and taxonomy) rather than editing the pipeline.
+
+| Exam | Status | Sources | Taxonomy |
+|------|--------|---------|----------|
+| RBI Grade B | **Active** | PIB + RBI circulars | `data/patterns/rbi-grade-b.json` |
+| UPSC / Banking | **Active (content in progress)** | all-ministry PIB + Economic Survey/Yojana | `data/patterns/upsc-banking.json` |
+| SEBI Grade A | Scaffolded | SEBI + PIB + RBI | `data/patterns/sebi-grade-a.json` |
+| NABARD Grade A | Scaffolded | NABARD + PIB + RBI | `data/patterns/nabard-grade-a.json` |
+
+**Per-exam GA weightage (#question pattern).** Each taxonomy carries a `prompt_profile`
+that drives the summary sections and the **topic + question-style distribution** for
+that exam. RBI Grade B uses 5 options (A–E) and is current-affairs/banking heavy; UPSC
+uses 4 options (A–D) and is dominated by "Consider the following statements" items. The
+weightage is derived empirically from each exam's previous-year GA papers:
+
+```bash
+# Tally PYQ topics → recompute the exam's topic distribution in its taxonomy
+python scripts/derive_weightage.py --exam rbi-grade-b --dry-run
+python scripts/derive_weightage.py --exam upsc-banking
+```
+
+Drop an exam's previous-year GA papers (as `{"question","options",...}` JSON) into
+`data/questions/pyq/<exam-slug>/` and re-run `derive_weightage.py` to refresh its mix.
+Until that is done, an exam uses the documented research-default weightage in its taxonomy.
 
 ## Setup
 
@@ -202,6 +240,9 @@ relevance tags.
 - **Self-contained summaries:** Ollama rewrites each item into an original 2–3
   sentence, exam-focused summary shown inline on the site (no outbound links) and
   credited to the originating outlet. Without Ollama, the RSS blurb is used as-is.
+- **Rolling 2-day window:** `NEWS_LOOKBACK_DAYS = 1` keeps only today + yesterday,
+  so anything that didn't make yesterday's digest surfaces today and stale items
+  roll off the next day. Widen with `--days` for a one-off catch-up.
 - **Exam tagging:** each item is screened for relevance to **RBI Grade B, SEBI
   Grade A, NABARD Grade A, and UPSC / Banking**. A keyword heuristic provides the
   baseline; Ollama refines the tags and topic when reachable.
@@ -244,13 +285,19 @@ This writes a fast, fully-static site to `docs/`:
 
 | Path | Contents |
 |------|----------|
-| `docs/index.html` | Landing page + chronological index of all weeks (newest first) |
-| `docs/weeks/<key>.html` | Per-week page: descriptive summary + interactive MCQ quiz |
+| `docs/index.html` | Landing page, **categorised by exam**, with each exam's chronological week index |
+| `docs/weeks/<exam-slug>/<key>.html` | Per-week page: descriptive summary + interactive MCQ quiz |
 | `docs/assets/style.css`, `docs/assets/app.js` | Minimalist styling + quiz logic |
 
-Each week page renders the summary with topic sections, highlighted figures/dates,
-and ⭐ priority markers, followed by an in-browser practice quiz (pick an option to
-see the correct answer, with a running score).
+The landing page groups weeks **per exam** (RBI Grade B, UPSC / Banking, …) with a
+jump-pill nav; an exam with no published weeks yet shows a "coming soon" panel. Each
+week page renders the summary with topic sections, highlighted figures/dates, and ⭐
+priority markers, followed by an in-browser practice quiz (pick an option to see the
+correct answer, with a running score).
+
+The site reads each exam's content from `data/summaries/<exam-slug>/` and
+`data/questions/generated/<exam-slug>/` (RBI Grade B keeps the original flat layout for
+backward compatibility).
 
 ### Automatic publishing
 
@@ -292,6 +339,9 @@ Edit `config.py` to change:
 - Ollama URL / model names
 - Ollama model fallback order, context window, and read timeout
 - Large-period chunking via `CHUNK_CONTENT_WORDS` and `CHUNK_SUMMARY_WORDS`
+- Source-material budget via `MAX_CONTENT_WORDS` (raised to **90,000** so far more
+  source text reaches the model before any truncation → richer, fuller summaries)
+- The exam registry via `EXAMS` / `DEFAULT_EXAM` (see *Multi-exam architecture*)
 - Weekly range via `WEEK_RANGE_START` and `WEEK_RANGE_END`
 - Scheduler frequency via `SCHEDULER_INTERVAL_HOURS`
 - Source URLs

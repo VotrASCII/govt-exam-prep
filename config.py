@@ -86,13 +86,19 @@ NEWS_EXAMS = {
     ],
 }
 # How many days back to include in a news digest, and the cap per source.
-NEWS_LOOKBACK_DAYS = 7
+# 1 => today + yesterday only (a rolling 2-day window): anything that didn't
+# make yesterday's digest surfaces today, and stale items roll off the next day.
+NEWS_LOOKBACK_DAYS = 1
 NEWS_MAX_PER_SOURCE = 40
 
 FUZZY_THRESHOLD = 0.85
-MAX_CONTENT_WORDS = 45_000
-CHUNK_CONTENT_WORDS = 12_000
-CHUNK_SUMMARY_WORDS = 1_500
+# Raised from 45k → 90k so far more source material reaches the model before any
+# truncation, producing richer, more comprehensive weekly summaries. Oversized
+# periods are still split into condensed chunk-notes (see CHUNK_* below) so the
+# whole window is used rather than silently dropping the tail.
+MAX_CONTENT_WORDS = 90_000
+CHUNK_CONTENT_WORDS = 14_000
+CHUNK_SUMMARY_WORDS = 2_200
 MIN_DETAIL_CONTENT_WORDS = 25
 MIN_DETAIL_CONTENT_COVERAGE = 0.80
 WEEK_RANGE_START = "2025-12-01"
@@ -101,3 +107,64 @@ WEEK_RANGE_START = "2025-12-01"
 # so the pipeline keeps publishing a new week every week with no end date.
 WEEK_RANGE_END = ""
 SCHEDULER_INTERVAL_HOURS = 6
+
+# ── Multi-exam registry ────────────────────────────────────────────────────
+# Each exam declares its own relevant sources, GA-pattern taxonomy, and display
+# metadata. The pipeline, site, and prompt builder all read this registry so a
+# new exam is added by appending an entry here (+ its scraper + taxonomy) rather
+# than by editing the pipeline. `sources` are scraper keys resolved in
+# daily_runner; `taxonomy` drives the summary sections + GA topic/style mix and
+# is derived empirically from that exam's previous-year GA papers.
+EXAMS = {
+    "rbi-grade-b": {
+        "name": "RBI Grade B",
+        "slug": "rbi-grade-b",
+        "order": 1,
+        "active": True,
+        "sources": ["pib", "rbi"],
+        "taxonomy": "data/patterns/rbi-grade-b.json",
+        "blurb": "Phase 1 General Awareness, built from PIB press releases and "
+                 "RBI circulars — heavy on monetary policy, banking and the economy.",
+    },
+    "upsc-banking": {
+        "name": "UPSC / Banking",
+        "slug": "upsc-banking",
+        "order": 2,
+        "active": True,
+        # Broad current affairs: all-ministry PIB plus Economic Survey / Yojana.
+        "sources": ["pib_all", "econsurvey"],
+        "taxonomy": "data/patterns/upsc-banking.json",
+        "blurb": "Broad general studies current affairs — polity, economy, "
+                 "international relations, environment, schemes and science & tech.",
+    },
+    # ── Scaffolded; activate once their scrapers + PYQ weightage are ready ──
+    "sebi-grade-a": {
+        "name": "SEBI Grade A",
+        "slug": "sebi-grade-a",
+        "order": 3,
+        "active": False,
+        "sources": ["sebi", "pib", "rbi"],
+        "taxonomy": "data/patterns/sebi-grade-a.json",
+        "blurb": "Securities markets, SEBI regulation and the wider economy.",
+    },
+    "nabard-grade-a": {
+        "name": "NABARD Grade A",
+        "slug": "nabard-grade-a",
+        "order": 4,
+        "active": False,
+        "sources": ["nabard", "pib", "rbi"],
+        "taxonomy": "data/patterns/nabard-grade-a.json",
+        "blurb": "Agriculture, rural development and the rural financial system.",
+    },
+}
+
+DEFAULT_EXAM = "rbi-grade-b"
+
+
+def active_exams() -> dict:
+    """Exams currently published, in display order."""
+    return {
+        k: v
+        for k, v in sorted(EXAMS.items(), key=lambda kv: kv[1].get("order", 99))
+        if v.get("active")
+    }

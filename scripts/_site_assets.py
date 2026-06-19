@@ -124,6 +124,29 @@ main{max-width:var(--max);margin:0 auto;padding:0 clamp(1.25rem,5vw,3.5rem)}
 }
 .section-head p{grid-column:2;color:var(--ink-soft);max-width:52ch;margin-top:.5rem}
 
+/* ---- exam categorisation ---- */
+.exam-pills{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:2rem}
+.exam-pill{
+  display:inline-flex;align-items:center;gap:.55rem;
+  padding:.5rem .95rem;border:1px solid var(--line);border-radius:2rem;
+  font-family:var(--mono);font-size:.78rem;letter-spacing:.02em;
+  color:var(--ink);text-decoration:none;
+  transition:border-color .3s var(--ease),background .3s var(--ease);
+}
+.exam-pill:hover{border-color:var(--accent);background:var(--bg-2)}
+.exam-pill .ep-n{
+  font-size:.7rem;color:var(--bg);background:var(--accent);
+  border-radius:1rem;padding:.05rem .5rem;min-width:1.2rem;text-align:center;
+}
+.exam-block{margin-top:5rem}
+.exam-block:first-of-type{margin-top:0}
+.exam-count{grid-column:2;font-family:var(--mono);font-size:.74rem;
+  color:var(--accent);letter-spacing:.03em;margin-top:.5rem}
+.exam-empty{
+  border-top:1px solid var(--line);padding:2.5rem .4rem;
+  color:var(--ink-soft);font-style:italic;
+}
+
 /* ---- week index list ---- */
 .week-list{border-top:1px solid var(--line)}
 .week-row{

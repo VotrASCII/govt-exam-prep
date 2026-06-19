@@ -1,19 +1,51 @@
 import json
+import sys
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
 
-def build_prompt(content: str, period_name: str, year: int | str | None = None) -> str:
+from config import DEFAULT_EXAM, EXAMS  # noqa: E402
+
+
+def _taxonomy_path(exam: str) -> Path:
+    cfg = EXAMS.get(exam) or EXAMS[DEFAULT_EXAM]
+    path = BASE_DIR / cfg["taxonomy"]
+    if path.exists():
+        return path
+    # Backward-compat: fall back to the original single-exam taxonomy.
+    return BASE_DIR / "data" / "patterns" / "taxonomy.json"
+
+
+def _load_taxonomy(exam: str) -> dict:
+    return json.loads(_taxonomy_path(exam).read_text())
+
+
+def build_prompt(
+    content: str,
+    period_name: str,
+    year: int | str | None = None,
+    exam: str = DEFAULT_EXAM,
+) -> str:
     period_label = f"{period_name} {year}".strip() if year else period_name
-    taxonomy_path = Path("data/patterns/taxonomy.json")
-    taxonomy = json.loads(taxonomy_path.read_text())
+    taxonomy = _load_taxonomy(exam)
+    profile = taxonomy["prompt_profile"]
+
+    coach_role = profile["coach_role"]
+    source_label = profile["source_label"]
+    total_questions = profile["total_questions"]
+    options_count = profile.get("options_count", 5)
+
+    # ── summary section headings ───────────────────────────────────────────
+    sections_str = "\n".join(f"## {s}" for s in profile["summary_sections"])
 
     # ── hot subtopics from every topic bucket ──────────────────────────────
     hot_subtopics = []
     for topic_data in taxonomy["topic_weights"].values():
-        hot_subtopics.extend(topic_data["hot_subtopics"])
+        hot_subtopics.extend(topic_data.get("hot_subtopics", []))
     hot_subtopics_str = "\n".join(f"  • {s}" for s in hot_subtopics)
 
-    # ── style writing rules + trap patterns ───────────────────────────────
+    # ── style writing rules + trap patterns ────────────────────────────────
     style_rules = []
     for style_name, style_data in taxonomy["question_style_distribution"].items():
         style_rules.append(
@@ -27,14 +59,35 @@ def build_prompt(content: str, period_name: str, year: int | str | None = None) 
     must_prepare = taxonomy["high_priority_topics_for_current_year"]["must_prepare"]
     must_prepare_str = "\n".join(f"  • {t}" for t in must_prepare)
 
-    # ── option E patterns ──────────────────────────────────────────────────
+    # ── GA topic + style distribution (empirical weightage per exam) ───────
+    topic_dist_str = "\n".join(
+        f"  • {label:<34}→ {count} questions"
+        for label, count in profile["topic_distribution"]
+    )
+    style_dist_str = "\n".join(
+        f"  • {label:<46}→ {count} questions"
+        for label, count in profile["style_distribution"]
+    )
+
+    # ── option-E patterns (only meaningful for 5-option exams) ─────────────
     option_e_patterns = ", ".join(
-        taxonomy["critical_format_rules"]["option_e_patterns"]
+        taxonomy["critical_format_rules"].get("option_e_patterns", [])
+    )
+
+    # ── critical format rules, numbered, with option-E substitution ────────
+    format_rules_str = "\n".join(
+        f"{i}. {rule.replace('{option_e_patterns}', option_e_patterns)}"
+        for i, rule in enumerate(profile["format_rules"], 1)
+    )
+
+    option_letters = ", ".join(["A", "B", "C", "D", "E"][:options_count])
+    option_line_example = "  ".join(
+        f"{letter}. [option]" for letter in ["A", "B", "C", "D", "E"][:options_count]
     )
 
     prompt = f"""\
-You are an expert RBI Grade B Phase 1 General Awareness exam coach.
-Below is raw content from PIB press releases and RBI circulars for {period_label}.
+You are an expert {coach_role}.
+Below is raw content from {source_label} for {period_label}.
 Do two things strictly as instructed.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -46,13 +99,7 @@ the news — not just memorise it — so write in clear explanatory prose, not t
 fragments.
 
 Use exactly these sections:
-## RBI & Monetary Policy
-## Banking & Financial Sector
-## Government Schemes & Budget
-## Economy & Trade
-## International Affairs & Organizations
-## Awards, Rankings & Appointments
-## Sports / Environment / Science & Tech
+{sections_str}
 
 Rules for the summary:
 - 50 bullet points per section max
@@ -73,52 +120,31 @@ When summarizing, pay special attention to content covering:
 {hot_subtopics_str}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PART 2 — 80 PRACTICE MCQs (RBI Grade B Phase 1 Style)
+PART 2 — {total_questions} PRACTICE MCQs ({profile['exam_name']} Style)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-TOPIC DISTRIBUTION — generate exactly this many questions per topic:
-  • RBI & Monetary Policy         → 21 questions
-  • Banking & Financial Sector    → 16 questions
-  • Government Schemes & Budget   → 11 questions
-  • International Affairs         → 11 questions
-  • Economy & Trade Data          → 11 questions
-  • Awards / Rankings             → 5 question
-  • Sports / Environment / Sci    → 5 question
+TOPIC DISTRIBUTION — generate exactly this many questions per topic
+(weightage derived from this exam's recent GA papers):
+{topic_dist_str}
 
 QUESTION STYLE DISTRIBUTION — generate this many of each style:
-  • Fill in the blank (exact numbers/names)      → 21 questions
-  • Direct factual (who/what/where)              → 16 questions
-  • Statement correct/incorrect (2-3 stmts)      → 16 questions
-  • NOT / odd one out                            → 11 questions
-  • Multiple statements select combination       → 11 questions
-  • Match the following                          → 5 question
+{style_dist_str}
 
 HOW TO WRITE EACH STYLE (follow these exactly):
 {style_rules_str}
 
 CRITICAL FORMAT RULES — non-negotiable:
-1. ALWAYS use exactly 5 options: A, B, C, D, E — NEVER use 4
-2. Option E must frequently be one of: {option_e_patterns}
-3. Fill-in-blank with numbers: options must be close (e.g. 5.7%, 5.9%, 6.0%, 6.1%, 6.2%) — never obvious gaps
-4. Start current affairs questions with 'Recently,'
-5. Reference specific reports in stems: RBI Annual Report, FSR, Union Budget, SPF, etc.
-6. Wrong options must be plausible entities from the same category — never random
-7. 'All of the above' and 'None of the above' as correct answers should appear at least 2-3 times across the 80 questions
-8. Do NOT invent facts — base every question strictly on the raw content below
-9. Do NOT use markdown bold/italic formatting in PART 2. No ** markers in questions or options.
-10. Every question MUST include exactly one answer line immediately after the options.
+{format_rules_str}
 
-OUTPUT FORMAT — strictly follow this for every question:
+OUTPUT FORMAT — strictly follow this for every question (use exactly {options_count} options, {option_letters}):
 Q[N]. [Question text]
-A. [option]  B. [option]  C. [option]  D. [option]  E. [option]
+{option_line_example}
 Answer: [letter]
 
 VALID PART 2 EXAMPLE:
-Q1. Recently, which institution released the Monetary Policy Statement?
-A. Reserve Bank of India  B. Ministry of Finance  C. SEBI  D. NABARD  E. None of the above
-Answer: A
+{profile['example_question']}
 
-Before finalizing PART 2, verify that all 80 questions have an Answer: line. Do not output a question without its answer.
+Before finalizing PART 2, verify that all {total_questions} questions have an Answer: line. Do not output a question without its answer.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RAW CONTENT — {period_label.upper()}

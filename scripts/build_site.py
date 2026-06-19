@@ -17,11 +17,15 @@ import html
 import json
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+from config import DEFAULT_EXAM, active_exams  # noqa: E402
 SUMMARIES_DIR = BASE_DIR / "data" / "summaries"
 GEN_Q_DIR = BASE_DIR / "data" / "questions" / "generated"
 NEWS_DIR = BASE_DIR / "data" / "news"
@@ -29,8 +33,19 @@ DOCS_DIR = BASE_DIR / "docs"
 ASSETS_DIR = DOCS_DIR / "assets"
 WEEKS_DIR = DOCS_DIR / "weeks"
 
-SITE_TITLE = "RBI Grade B · Weekly GA"
-SITE_TAGLINE = "Current affairs for RBI Grade B Phase 1, distilled week by week."
+SITE_TITLE = "Govt Exams · Weekly GA"
+SITE_TAGLINE = "Current affairs for India's top government exams, distilled week by week."
+
+
+def _exam_dirs(slug: str) -> tuple[Path, Path]:
+    """Summary + generated-question directories for an exam.
+
+    The default exam keeps the original flat layout for backward compatibility;
+    every other exam is namespaced under its slug.
+    """
+    if slug == DEFAULT_EXAM:
+        return SUMMARIES_DIR, GEN_Q_DIR
+    return SUMMARIES_DIR / slug, GEN_Q_DIR / slug
 
 WEEKLY_KEY_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})$")
 WEEK_NUM_RE = re.compile(r"Week\s+(\d+)", re.IGNORECASE)
@@ -90,6 +105,13 @@ class Week:
     @staticmethod
     def _fmt_short(d: date) -> str:
         return f"{d.day:02d} {MONTHS[d.month]}"
+
+
+@dataclass
+class ExamGroup:
+    slug: str
+    cfg: dict
+    weeks: list[Week] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +232,12 @@ def _parse_key(key: str) -> tuple[date, date] | None:
     return start, end
 
 
-def load_weeks() -> list[Week]:
+def load_weeks(slug: str = DEFAULT_EXAM) -> list[Week]:
     weeks: list[Week] = []
-    for path in sorted(SUMMARIES_DIR.glob("*_to_*.md")):
+    summaries_dir, gen_q_dir = _exam_dirs(slug)
+    if not summaries_dir.exists():
+        return weeks
+    for path in sorted(summaries_dir.glob("*_to_*.md")):
         key = path.stem
         parsed = _parse_key(key)
         if not parsed:
@@ -229,7 +254,7 @@ def load_weeks() -> list[Week]:
         sections, note = parse_summary(text)
 
         questions: list[dict] = []
-        qpath = GEN_Q_DIR / f"{key}-qs.json"
+        qpath = gen_q_dir / f"{key}-qs.json"
         if qpath.exists():
             try:
                 data = json.loads(qpath.read_text(encoding="utf-8"))
@@ -269,7 +294,7 @@ def _head(title: str, root: str, description: str) -> str:
 
 def _nav(root: str) -> str:
     return f"""<header class="nav reveal">
-  <a class="brand" href="{root}index.html">RBI<span class="brand-dot">·</span>GA</a>
+  <a class="brand" href="{root}index.html">Govt&nbsp;Exams<span class="brand-dot">·</span>GA</a>
   <nav class="nav-links">
     <a href="{root}index.html#index">Weeks</a>
     <a href="{root}news.html">News</a>
@@ -298,23 +323,61 @@ def _footer(root: str) -> str:
 </html>"""
 
 
-def render_index(weeks: list[Week]) -> str:
-    total_q = sum(len(w.questions) for w in weeks)
-    latest = weeks[0] if weeks else None
-
-    rows = []
-    for w in weeks:
-        rows.append(f"""
-      <a class="week-row reveal" href="weeks/{w.slug}.html">
+def _exam_panel(group: "ExamGroup", index: int) -> str:
+    cfg = group.cfg
+    weeks = group.weeks
+    if weeks:
+        rows = "".join(
+            f"""
+      <a class="week-row reveal" href="weeks/{group.slug}/{w.slug}.html">
         <span class="wr-num">{w.label}</span>
         <span class="wr-title">{_escape(w.short_range)}</span>
         <span class="wr-meta">{w.topic_count} topics<span class="wr-sep">·</span>{len(w.questions)} questions</span>
         <span class="wr-arrow">→</span>
-      </a>""")
+      </a>"""
+            for w in weeks
+        )
+        body = f'<div class="week-list">{rows}\n    </div>'
+        count_line = (
+            f"{len(weeks)} week{'s' if len(weeks) != 1 else ''} · "
+            f"{sum(len(w.questions) for w in weeks):,} questions"
+        )
+    else:
+        body = (
+            '<div class="exam-empty reveal">Weekly summaries and practice for this '
+            'exam are being generated — check back soon.</div>'
+        )
+        count_line = "Coming soon"
 
+    return f"""
+  <section id="exam-{group.slug}" class="exam-block">
+    <div class="section-head reveal">
+      <span class="sh-num">{index:02d}</span>
+      <h2>{_escape(cfg['name'])}</h2>
+      <p>{_escape(cfg.get('blurb', ''))}</p>
+      <p class="exam-count">{count_line}</p>
+    </div>
+    {body}
+  </section>"""
+
+
+def render_index(groups: "list[ExamGroup]") -> str:
+    total_weeks = sum(len(g.weeks) for g in groups)
+    total_q = sum(len(w.questions) for g in groups for w in g.weeks)
+    populated = [g for g in groups if g.weeks]
+    latest = max((g.weeks[0] for g in populated), key=lambda w: w.start, default=None)
     latest_line = (
-        f"Latest: {latest.label} · {_escape(latest.short_range)}" if latest else "No weeks published yet."
+        f"Latest: {latest.label} · {_escape(latest.short_range)}"
+        if latest
+        else "No weeks published yet."
     )
+
+    pills = "".join(
+        f'<a class="exam-pill" href="#exam-{g.slug}">{_escape(g.cfg["name"])}'
+        f'<span class="ep-n">{len(g.weeks)}</span></a>'
+        for g in groups
+    )
+    panels = "".join(_exam_panel(g, i) for i, g in enumerate(groups, 1))
 
     head = _head(SITE_TITLE, "", SITE_TAGLINE)
     return f"""{head}
@@ -322,39 +385,33 @@ def render_index(weeks: list[Week]) -> str:
 {_nav("")}
 <main>
   <section class="hero">
-    <p class="eyebrow reveal">RBI Grade B · Phase 1 · General Awareness</p>
+    <p class="eyebrow reveal">Government exams · General Awareness</p>
     <h1 class="display reveal">Current affairs,<br><em>distilled</em> week by week.</h1>
-    <p class="lede reveal">{_escape(SITE_TAGLINE)} Every week is summarised from PIB press
-    releases and RBI circulars, then turned into exam-style practice.</p>
+    <p class="lede reveal">{_escape(SITE_TAGLINE)} Each exam is summarised from its own
+    relevant sources, then turned into exam-style practice tuned to that paper's GA pattern.</p>
     <div class="hero-meta reveal">
-      <span><b>{len(weeks)}</b> weeks</span>
+      <span><b>{len(groups)}</b> exams</span>
+      <span><b>{total_weeks}</b> weeks</span>
       <span><b>{total_q:,}</b> practice questions</span>
       <span class="hero-latest">{latest_line}</span>
     </div>
-    <a class="scroll-cue reveal" href="#index">Browse weeks ↓</a>
+    <div class="exam-pills reveal">{pills}</div>
   </section>
 
-  <section id="index" class="index">
-    <div class="section-head reveal">
-      <span class="sh-num">01</span>
-      <h2>The index</h2>
-      <p>Most recent first. Each week pairs a descriptive summary with practice MCQs.</p>
-    </div>
-    <div class="week-list">{''.join(rows)}
-    </div>
+  <section id="index" class="index">{panels}
   </section>
 
   <section id="about" class="about">
     <div class="section-head reveal">
-      <span class="sh-num">02</span>
+      <span class="sh-num">★</span>
       <h2>How it works</h2>
     </div>
     <div class="about-grid">
       <div class="about-card reveal">
         <span class="ac-num">i</span>
-        <h3>Primary sources</h3>
-        <p>Each week is scraped directly from Press Information Bureau releases and
-        Reserve Bank of India circulars — the same notifications the exam draws from.</p>
+        <h3>Exam-specific sources</h3>
+        <p>Each exam is built from the notifications it actually draws on — PIB and RBI
+        for RBI Grade B, broad PIB and the Economic Survey for UPSC, and so on.</p>
       </div>
       <div class="about-card reveal">
         <span class="ac-num">ii</span>
@@ -364,9 +421,9 @@ def render_index(weeks: list[Week]) -> str:
       </div>
       <div class="about-card reveal">
         <span class="ac-num">iii</span>
-        <h3>Practice, not just reading</h3>
-        <p>Every week ships exam-style MCQs you can attempt in the browser, with
-        instant scoring, so recall is tested while the news is fresh.</p>
+        <h3>Pattern-tuned practice</h3>
+        <p>Every week ships exam-style MCQs whose topic and question-type mix is weighted
+        from that exam's recent papers, attempted in the browser with instant scoring.</p>
       </div>
     </div>
   </section>
@@ -402,7 +459,13 @@ def _render_section(index: int, section: Section) -> str:
     </section>"""
 
 
-def render_week(week: Week, prev_w: Week | None, next_w: Week | None) -> str:
+def render_week(
+    week: Week,
+    prev_w: Week | None,
+    next_w: Week | None,
+    cfg: dict,
+) -> str:
+    exam_name = cfg["name"]
     sections_html = "".join(
         _render_section(i, s) for i, s in enumerate(week.sections, 1)
     )
@@ -447,18 +510,19 @@ def render_week(week: Week, prev_w: Week | None, next_w: Week | None) -> str:
 
     quiz_data = json.dumps(week.questions, ensure_ascii=False)
 
+    root = "../../"
     head = _head(
-        f"{week.label} · {week.short_range} — {SITE_TITLE}",
-        "../",
-        f"RBI Grade B weekly GA summary and practice MCQs for {week.date_range}.",
+        f"{exam_name} · {week.label} · {week.short_range} — {SITE_TITLE}",
+        root,
+        f"{exam_name} weekly GA summary and practice MCQs for {week.date_range}.",
     )
     return f"""{head}
 <body class="week-page">
-{_nav("../")}
+{_nav(root)}
 <main class="week-main">
-  <a class="back-link reveal" href="../index.html#index">← All weeks</a>
+  <a class="back-link reveal" href="{root}index.html#exam-{cfg['slug']}">← All {_escape(exam_name)} weeks</a>
   <header class="week-head">
-    <p class="eyebrow reveal">{week.label} · General Awareness</p>
+    <p class="eyebrow reveal">{_escape(exam_name)} · {week.label} · General Awareness</p>
     <h1 class="display reveal">{_escape(week.short_range)}</h1>
     <p class="lede reveal">{week.topic_count} topics summarised · {len(week.questions)} practice questions</p>
   </header>
@@ -471,7 +535,7 @@ def render_week(week: Week, prev_w: Week | None, next_w: Week | None) -> str:
   <nav class="week-pager reveal">{''.join(pager)}</nav>
 </main>
 <script id="quiz-data" type="application/json">{quiz_data}</script>
-{_footer("../")}"""
+{_footer(root)}"""
 
 
 # ---------------------------------------------------------------------------
@@ -587,9 +651,13 @@ def render_news(news: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def build() -> None:
-    weeks = load_weeks()
-    if not weeks:
-        print("No weekly summaries found — nothing to build.")
+    groups = [
+        ExamGroup(slug=slug, cfg=cfg, weeks=load_weeks(slug))
+        for slug, cfg in active_exams().items()
+    ]
+    total_weeks = sum(len(g.weeks) for g in groups)
+    if total_weeks == 0:
+        print("No weekly summaries found for any active exam — nothing to build.")
         return
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
@@ -599,14 +667,19 @@ def build() -> None:
         shutil.rmtree(WEEKS_DIR)
     WEEKS_DIR.mkdir(parents=True, exist_ok=True)
 
-    (DOCS_DIR / "index.html").write_text(render_index(weeks), encoding="utf-8")
+    (DOCS_DIR / "index.html").write_text(render_index(groups), encoding="utf-8")
 
-    # weeks are sorted newest-first; build chronological neighbours.
-    for i, week in enumerate(weeks):
-        newer = weeks[i - 1] if i > 0 else None          # newer = earlier in list
-        older = weeks[i + 1] if i + 1 < len(weeks) else None
-        page = render_week(week, prev_w=older, next_w=newer)
-        (WEEKS_DIR / f"{week.slug}.html").write_text(page, encoding="utf-8")
+    for group in groups:
+        if not group.weeks:
+            continue
+        exam_weeks_dir = WEEKS_DIR / group.slug
+        exam_weeks_dir.mkdir(parents=True, exist_ok=True)
+        weeks = group.weeks  # newest-first
+        for i, week in enumerate(weeks):
+            newer = weeks[i - 1] if i > 0 else None      # newer = earlier in list
+            older = weeks[i + 1] if i + 1 < len(weeks) else None
+            page = render_week(week, prev_w=older, next_w=newer, cfg=group.cfg)
+            (exam_weeks_dir / f"{week.slug}.html").write_text(page, encoding="utf-8")
 
     news = load_news()
     if news:
@@ -615,9 +688,10 @@ def build() -> None:
     write_assets()
     (DOCS_DIR / ".nojekyll").write_text("", encoding="utf-8")
 
-    print(f"Built {len(weeks)} week pages + index → {DOCS_DIR.relative_to(BASE_DIR)}")
-    print(f"  Latest: {weeks[0].label} ({weeks[0].date_range})")
-    print(f"  Practice questions: {sum(len(w.questions) for w in weeks):,}")
+    summary_bits = ", ".join(f"{g.cfg['name']}: {len(g.weeks)}" for g in groups)
+    print(f"Built {total_weeks} week pages across {len(groups)} exams → {DOCS_DIR.relative_to(BASE_DIR)}")
+    print(f"  {summary_bits}")
+    print(f"  Practice questions: {sum(len(w.questions) for g in groups for w in g.weeks):,}")
     if news:
         print(f"  News digest: {news['count']} items → docs/news.html")
     else:
