@@ -25,13 +25,20 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from config import DEFAULT_EXAM, active_exams  # noqa: E402
+from config import (  # noqa: E402
+    DEFAULT_EXAM,
+    active_exams,
+    current_cycle_start,
+    cycle_label,
+    cycle_start_for,
+)
 SUMMARIES_DIR = BASE_DIR / "data" / "summaries"
 GEN_Q_DIR = BASE_DIR / "data" / "questions" / "generated"
 NEWS_DIR = BASE_DIR / "data" / "news"
 DOCS_DIR = BASE_DIR / "docs"
 ASSETS_DIR = DOCS_DIR / "assets"
 WEEKS_DIR = DOCS_DIR / "weeks"
+EXAMS_PAGE_DIR = DOCS_DIR / "exams"
 
 SITE_TITLE = "Govt Exams · Weekly GA"
 SITE_TAGLINE = "Current affairs for India's top government exams, distilled week by week."
@@ -108,10 +115,55 @@ class Week:
 
 
 @dataclass
+class Cycle:
+    anchor: date
+    label: str
+    is_current: bool
+    weeks: list[Week]  # newest-first for display; week.number set within cycle
+
+
+@dataclass
 class ExamGroup:
     slug: str
     cfg: dict
     weeks: list[Week] = field(default_factory=list)
+    cycles: list[Cycle] = field(default_factory=list)
+
+    @property
+    def current(self) -> "Cycle | None":
+        return next((c for c in self.cycles if c.is_current), None)
+
+    @property
+    def archived(self) -> list[Cycle]:
+        return [c for c in self.cycles if not c.is_current]
+
+    @property
+    def current_weeks(self) -> list[Week]:
+        cur = self.current
+        return cur.weeks if cur else []
+
+
+def group_into_cycles(weeks: list[Week]) -> list[Cycle]:
+    """Partition weeks into study cycles and renumber each cycle from Week 1."""
+    cur_anchor = current_cycle_start()
+    by_anchor: dict[date, list[Week]] = {}
+    for w in weeks:
+        by_anchor.setdefault(cycle_start_for(w.start), []).append(w)
+
+    cycles: list[Cycle] = []
+    for anchor in sorted(by_anchor, reverse=True):
+        ascending = sorted(by_anchor[anchor], key=lambda w: w.start)
+        for i, w in enumerate(ascending, 1):
+            w.number = i  # renumber within the cycle (Week 1 = first week)
+        cycles.append(
+            Cycle(
+                anchor=anchor,
+                label=cycle_label(anchor),
+                is_current=(anchor == cur_anchor),
+                weeks=list(reversed(ascending)),  # newest-first
+            )
+        )
+    return cycles
 
 
 # ---------------------------------------------------------------------------
@@ -292,13 +344,17 @@ def _head(title: str, root: str, description: str) -> str:
 </head>"""
 
 
-def _nav(root: str) -> str:
+def _nav(root: str = "", active: str | None = None) -> str:
+    exam_links = "".join(
+        f'<a class="{"on" if slug == active else ""}" '
+        f'href="{root}exams/{slug}.html">{_escape(cfg["name"])}</a>'
+        for slug, cfg in active_exams().items()
+    )
     return f"""<header class="nav reveal">
   <a class="brand" href="{root}index.html">Govt&nbsp;Exams<span class="brand-dot">·</span>GA</a>
   <nav class="nav-links">
-    <a href="{root}index.html#index">Weeks</a>
-    <a href="{root}news.html">News</a>
-    <a href="{root}index.html#about">About</a>
+    {exam_links}
+    <a class="{"on" if active == "news" else ""}" href="{root}news.html">News</a>
   </nav>
 </header>"""
 
@@ -308,8 +364,8 @@ def _footer(root: str) -> str:
     return f"""<footer class="site-foot reveal">
   <div class="foot-grid">
     <div>
-      <div class="foot-mark">RBI · GA</div>
-      <p class="foot-note">Weekly General Awareness, built from primary sources.</p>
+      <div class="foot-mark">Govt Exams · GA</div>
+      <p class="foot-note">Weekly General Awareness for government exams, built from primary sources.</p>
     </div>
     <div class="foot-links">
       <a href="https://www.pib.gov.in/" target="_blank" rel="noopener">PIB releases ↗</a>
@@ -323,61 +379,46 @@ def _footer(root: str) -> str:
 </html>"""
 
 
-def _exam_panel(group: "ExamGroup", index: int) -> str:
-    cfg = group.cfg
-    weeks = group.weeks
-    if weeks:
-        rows = "".join(
-            f"""
-      <a class="week-row reveal" href="weeks/{group.slug}/{w.slug}.html">
+def _week_row(group_slug: str, w: Week, root: str = "") -> str:
+    return f"""
+      <a class="week-row reveal" href="{root}weeks/{group_slug}/{w.slug}.html">
         <span class="wr-num">{w.label}</span>
         <span class="wr-title">{_escape(w.short_range)}</span>
         <span class="wr-meta">{w.topic_count} topics<span class="wr-sep">·</span>{len(w.questions)} questions</span>
         <span class="wr-arrow">→</span>
       </a>"""
-            for w in weeks
+
+
+def _exam_card(group: "ExamGroup") -> str:
+    cur = group.current_weeks
+    latest = cur[0] if cur else None
+    if latest:
+        meta = (
+            f"{len(cur)} week{'s' if len(cur) != 1 else ''} · "
+            f"{sum(len(w.questions) for w in cur):,} questions"
         )
-        body = f'<div class="week-list">{rows}\n    </div>'
-        count_line = (
-            f"{len(weeks)} week{'s' if len(weeks) != 1 else ''} · "
-            f"{sum(len(w.questions) for w in weeks):,} questions"
-        )
+        latest_line = f"Latest · {latest.label} · {_escape(latest.short_range)}"
     else:
-        body = (
-            '<div class="exam-empty reveal">Weekly summaries and practice for this '
-            'exam are being generated — check back soon.</div>'
-        )
-        count_line = "Coming soon"
+        meta = "Coming soon"
+        latest_line = "Content being generated"
+    arch = f" · {sum(len(c.weeks) for c in group.archived)} archived" if group.archived else ""
 
     return f"""
-  <section id="exam-{group.slug}" class="exam-block">
-    <div class="section-head reveal">
-      <span class="sh-num">{index:02d}</span>
-      <h2>{_escape(cfg['name'])}</h2>
-      <p>{_escape(cfg.get('blurb', ''))}</p>
-      <p class="exam-count">{count_line}</p>
-    </div>
-    {body}
-  </section>"""
+      <a class="exam-card reveal" href="exams/{group.slug}.html">
+        <h3>{_escape(group.cfg['name'])}</h3>
+        <p class="ec-blurb">{_escape(group.cfg.get('blurb', ''))}</p>
+        <div class="ec-foot">
+          <span class="ec-meta">{meta}{arch}</span>
+          <span class="ec-latest">{latest_line}</span>
+        </div>
+        <span class="ec-go">Open {_escape(group.cfg['name'])} →</span>
+      </a>"""
 
 
 def render_index(groups: "list[ExamGroup]") -> str:
-    total_weeks = sum(len(g.weeks) for g in groups)
-    total_q = sum(len(w.questions) for g in groups for w in g.weeks)
-    populated = [g for g in groups if g.weeks]
-    latest = max((g.weeks[0] for g in populated), key=lambda w: w.start, default=None)
-    latest_line = (
-        f"Latest: {latest.label} · {_escape(latest.short_range)}"
-        if latest
-        else "No weeks published yet."
-    )
-
-    pills = "".join(
-        f'<a class="exam-pill" href="#exam-{g.slug}">{_escape(g.cfg["name"])}'
-        f'<span class="ep-n">{len(g.weeks)}</span></a>'
-        for g in groups
-    )
-    panels = "".join(_exam_panel(g, i) for i, g in enumerate(groups, 1))
+    total_weeks = sum(len(g.current_weeks) for g in groups)
+    total_q = sum(len(w.questions) for g in groups for w in g.current_weeks)
+    cards = "".join(_exam_card(g) for g in groups)
 
     head = _head(SITE_TITLE, "", SITE_TAGLINE)
     return f"""{head}
@@ -391,19 +432,26 @@ def render_index(groups: "list[ExamGroup]") -> str:
     relevant sources, then turned into exam-style practice tuned to that paper's GA pattern.</p>
     <div class="hero-meta reveal">
       <span><b>{len(groups)}</b> exams</span>
-      <span><b>{total_weeks}</b> weeks</span>
+      <span><b>{total_weeks}</b> weeks this cycle</span>
       <span><b>{total_q:,}</b> practice questions</span>
-      <span class="hero-latest">{latest_line}</span>
     </div>
-    <div class="exam-pills reveal">{pills}</div>
+    <a class="scroll-cue reveal" href="#exams">Choose your exam ↓</a>
   </section>
 
-  <section id="index" class="index">{panels}
+  <section id="exams" class="exam-grid-wrap">
+    <div class="section-head reveal">
+      <span class="sh-num">01</span>
+      <h2>Pick an exam</h2>
+      <p>Each exam has its own page — weekly summaries and practice for the current cycle,
+      with earlier cycles tucked into its archive.</p>
+    </div>
+    <div class="exam-grid">{cards}
+    </div>
   </section>
 
   <section id="about" class="about">
     <div class="section-head reveal">
-      <span class="sh-num">★</span>
+      <span class="sh-num">02</span>
       <h2>How it works</h2>
     </div>
     <div class="about-grid">
@@ -429,6 +477,83 @@ def render_index(groups: "list[ExamGroup]") -> str:
   </section>
 </main>
 {_footer("")}"""
+
+
+def render_exam_page(group: "ExamGroup") -> str:
+    cfg = group.cfg
+    cur = group.current_weeks
+    cur_cycle = group.current
+
+    if cur:
+        rows = "".join(_week_row(group.slug, w) for w in cur)
+        main_body = f'<div class="week-list">{rows}\n    </div>'
+    else:
+        main_body = (
+            '<div class="exam-empty reveal">Weekly summaries and practice for this '
+            'exam are being generated — check back soon.</div>'
+        )
+
+    cycle_label_txt = cur_cycle.label if cur_cycle else cycle_label(current_cycle_start())
+    count_line = (
+        f"{len(cur)} week{'s' if len(cur) != 1 else ''} · "
+        f"{sum(len(w.questions) for w in cur):,} questions"
+        if cur
+        else "Coming soon"
+    )
+
+    archive_html = ""
+    if group.archived:
+        blocks = []
+        for c in group.archived:
+            arows = "".join(_week_row(group.slug, w) for w in c.weeks)
+            blocks.append(
+                f"""
+      <details class="archive-cycle">
+        <summary>{c.label} cycle <span class="ac-count">{len(c.weeks)} weeks</span></summary>
+        <div class="week-list">{arows}
+        </div>
+      </details>"""
+            )
+        archive_html = f"""
+  <section id="archive" class="archive">
+    <div class="section-head reveal">
+      <span class="sh-num">↧</span>
+      <h2>Archive</h2>
+      <p>Earlier study cycles, kept for reference. Each new year these roll over automatically.</p>
+    </div>
+    {''.join(blocks)}
+  </section>"""
+
+    head = _head(
+        f"{cfg['name']} · Weekly GA — {SITE_TITLE}",
+        "../",
+        f"{cfg['name']} weekly General Awareness summaries and practice MCQs.",
+    )
+    return f"""{head}
+<body>
+{_nav("../", active=group.slug)}
+<main>
+  <section class="hero exam-hero">
+    <p class="eyebrow reveal">{_escape(cfg['name'])} · General Awareness</p>
+    <h1 class="display reveal">{_escape(cfg['name'])}</h1>
+    <p class="lede reveal">{_escape(cfg.get('blurb', ''))}</p>
+    <div class="hero-meta reveal">
+      <span><b>{cycle_label_txt}</b> cycle</span>
+      <span>{count_line}</span>
+    </div>
+  </section>
+
+  <section id="index" class="index">
+    <div class="section-head reveal">
+      <span class="sh-num">01</span>
+      <h2>This cycle</h2>
+      <p>Most recent first. Each week pairs a descriptive summary with practice MCQs.</p>
+    </div>
+    {main_body}
+  </section>
+{archive_html}
+</main>
+{_footer("../")}"""
 
 
 def _render_section(index: int, section: Section) -> str:
@@ -518,9 +643,9 @@ def render_week(
     )
     return f"""{head}
 <body class="week-page">
-{_nav(root)}
+{_nav(root, active=cfg['slug'])}
 <main class="week-main">
-  <a class="back-link reveal" href="{root}index.html#exam-{cfg['slug']}">← All {_escape(exam_name)} weeks</a>
+  <a class="back-link reveal" href="{root}exams/{cfg['slug']}.html">← All {_escape(exam_name)} weeks</a>
   <header class="week-head">
     <p class="eyebrow reveal">{_escape(exam_name)} · {week.label} · General Awareness</p>
     <h1 class="display reveal">{_escape(week.short_range)}</h1>
@@ -651,10 +776,13 @@ def render_news(news: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def build() -> None:
-    groups = [
-        ExamGroup(slug=slug, cfg=cfg, weeks=load_weeks(slug))
-        for slug, cfg in active_exams().items()
-    ]
+    groups: list[ExamGroup] = []
+    for slug, cfg in active_exams().items():
+        weeks = load_weeks(slug)
+        groups.append(
+            ExamGroup(slug=slug, cfg=cfg, weeks=weeks, cycles=group_into_cycles(weeks))
+        )
+
     total_weeks = sum(len(g.weeks) for g in groups)
     if total_weeks == 0:
         print("No weekly summaries found for any active exam — nothing to build.")
@@ -662,24 +790,33 @@ def build() -> None:
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-    # Fresh weeks dir each build so removed content doesn't linger.
-    if WEEKS_DIR.exists():
-        shutil.rmtree(WEEKS_DIR)
-    WEEKS_DIR.mkdir(parents=True, exist_ok=True)
+    EXAMS_PAGE_DIR.mkdir(parents=True, exist_ok=True)
+    # Fresh weeks + exams dirs each build so removed content doesn't linger.
+    for d in (WEEKS_DIR, EXAMS_PAGE_DIR):
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True, exist_ok=True)
 
     (DOCS_DIR / "index.html").write_text(render_index(groups), encoding="utf-8")
 
     for group in groups:
+        # Per-exam landing page (always built, even when empty → "coming soon").
+        (EXAMS_PAGE_DIR / f"{group.slug}.html").write_text(
+            render_exam_page(group), encoding="utf-8"
+        )
         if not group.weeks:
             continue
+        # Week detail pages: build every week (current + archived). Chronological
+        # neighbours are taken within each cycle so the pager stays inside a cycle.
         exam_weeks_dir = WEEKS_DIR / group.slug
         exam_weeks_dir.mkdir(parents=True, exist_ok=True)
-        weeks = group.weeks  # newest-first
-        for i, week in enumerate(weeks):
-            newer = weeks[i - 1] if i > 0 else None      # newer = earlier in list
-            older = weeks[i + 1] if i + 1 < len(weeks) else None
-            page = render_week(week, prev_w=older, next_w=newer, cfg=group.cfg)
-            (exam_weeks_dir / f"{week.slug}.html").write_text(page, encoding="utf-8")
+        for cycle in group.cycles:
+            weeks = cycle.weeks  # newest-first
+            for i, week in enumerate(weeks):
+                newer = weeks[i - 1] if i > 0 else None
+                older = weeks[i + 1] if i + 1 < len(weeks) else None
+                page = render_week(week, prev_w=older, next_w=newer, cfg=group.cfg)
+                (exam_weeks_dir / f"{week.slug}.html").write_text(page, encoding="utf-8")
 
     news = load_news()
     if news:
@@ -688,8 +825,12 @@ def build() -> None:
     write_assets()
     (DOCS_DIR / ".nojekyll").write_text("", encoding="utf-8")
 
-    summary_bits = ", ".join(f"{g.cfg['name']}: {len(g.weeks)}" for g in groups)
-    print(f"Built {total_weeks} week pages across {len(groups)} exams → {DOCS_DIR.relative_to(BASE_DIR)}")
+    summary_bits = ", ".join(
+        f"{g.cfg['name']}: {len(g.current_weeks)} this cycle"
+        f"{f' (+{sum(len(c.weeks) for c in g.archived)} archived)' if g.archived else ''}"
+        for g in groups
+    )
+    print(f"Built {len(groups)} exam pages + {total_weeks} week pages → {DOCS_DIR.relative_to(BASE_DIR)}")
     print(f"  {summary_bits}")
     print(f"  Practice questions: {sum(len(w.questions) for g in groups for w in g.weeks):,}")
     if news:

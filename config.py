@@ -1,3 +1,5 @@
+from datetime import date as _date, timedelta as _timedelta
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL_PRIMARY = "gpt-oss:120b-cloud"
 OLLAMA_MODEL_FALLBACK = "qwen3.5:2b"
@@ -168,3 +170,33 @@ def active_exams() -> dict:
         for k, v in sorted(EXAMS.items(), key=lambda kv: kv[1].get("order", 99))
         if v.get("active")
     }
+
+
+# ── Study-cycle / archive logic ────────────────────────────────────────────
+# A "study cycle" (the set of weeks shown on the main listing) starts on the
+# LAST MONDAY OF DECEMBER and runs ~52 weeks to the next one. So the 2025–26
+# cycle begins Mon 29 Dec 2025 = Week 1. When a new cycle begins (next late
+# December), the previous cycle's weeks automatically move to the Archive
+# section — no manual migration. Weeks before the current cycle's start (e.g.
+# the Dec 1–28 2025 blocks) are archived, not shown in the main list.
+
+def last_monday_of_december(year: int) -> _date:
+    d = _date(year, 12, 31)
+    while d.weekday() != 0:  # 0 = Monday
+        d -= _timedelta(days=1)
+    return d
+
+
+def cycle_start_for(d: _date) -> _date:
+    """The study-cycle anchor (start date) that the date ``d`` belongs to."""
+    anchor = last_monday_of_december(d.year)
+    return anchor if d >= anchor else last_monday_of_december(d.year - 1)
+
+
+def current_cycle_start(today: _date | None = None) -> _date:
+    return cycle_start_for(today or _date.today())
+
+
+def cycle_label(anchor: _date) -> str:
+    """Human label for a cycle, e.g. anchor in Dec 2025 → '2025–26'."""
+    return f"{anchor.year}–{str(anchor.year + 1)[-2:]}"
