@@ -1,0 +1,51 @@
+# .claudeignore — keep the context window lean.
+# Excludes generated output, caches, logs, scraped/LLM data, and build artifacts.
+# Active development lives in: config.py, run.py, pipeline/, scrapers/, scripts/,
+# data/patterns/ (per-exam taxonomy), README.md, requirements.txt.
+
+# ── Python caches / build artifacts ─────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+
+# ── Virtual environments ────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── OS / editor / secrets ───────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+.env
+.claude/
+
+# ── Version control ─────────────────────────────────────────────────────────
+.git/
+
+# ── Tests (none today; defensive) ───────────────────────────────────────────
+tests/
+test_*.py
+*_test.py
+.coverage
+htmlcov/
+
+# ── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Generated static site (built by scripts/build_site.py) ──────────────────
+docs/
+
+# ── Generated / cached data (scrapes, LLM output, summaries, PDFs, news) ─────
+# Ignore everything under data/ EXCEPT the hand-edited taxonomy in data/patterns/.
+data/**
+!data/patterns/
+!data/patterns/**

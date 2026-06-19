@@ -1,9 +1,9 @@
 # Govt Exams — GA Prep Tool
 
 Automated scraper and AI study assistant for the General Awareness papers of
-India's top government exams. Built first for **RBI Grade B Phase 1**, now being
-generalised to a **multi-exam** platform (UPSC / Banking next, then SEBI Grade A
-and NABARD Grade A).
+India's top government exams. Built first for **RBI Grade B Phase 1** and now a
+**multi-exam** platform — RBI Grade B and UPSC / Banking are live, with SEBI Grade A
+and NABARD Grade A scaffolded.
 
 **Live site:** https://votrascii.github.io/govt-exam-prep/
 
@@ -15,11 +15,14 @@ and NABARD Grade A).
    local caching
 3. **Generates AI summaries + practice MCQs** for weekly or monthly periods using Ollama,
    with the topic and question-type mix tuned per exam (see *Multi-exam architecture*)
-4. **Schedules itself** to process one completed week every 6 hours
+4. **Schedules itself** — every **Monday 00:00** it ingests the just-completed week
+   (Mon–Sun) for **all active exams**, then pushes so GitHub Pages redeploys; the news
+   digest refreshes **daily at 00:00**
 5. **Publishes a minimalist website** ([live here](https://votrascii.github.io/govt-exam-prep/))
    **categorised by exam**, each with descriptive summaries and an in-browser practice quiz
-6. **Curates exam-relevant news** from ET / Mint / Hindustan Times (via RSS), tagged by
-   exam and shown as self-contained summaries (rolling 2-day window)
+6. **Curates exam-relevant news** from ET / Mint / Hindustan Times / Business Standard
+   (via RSS), tagged by exam and shown as self-contained summaries — the headline list
+   is today + yesterday, with the rest of the week tucked into a collapsible *In this week*
 
 ## Multi-exam architecture
 
@@ -31,7 +34,7 @@ appending an entry (plus its scraper and taxonomy) rather than editing the pipel
 | Exam | Status | Sources | Taxonomy |
 |------|--------|---------|----------|
 | RBI Grade B | **Active** | PIB + RBI circulars | `data/patterns/rbi-grade-b.json` |
-| UPSC / Banking | **Active (content in progress)** | all-ministry PIB + Economic Survey/Yojana | `data/patterns/upsc-banking.json` |
+| UPSC / Banking | **Active (content in progress)** | all-ministry PIB (weekly) + Economic Survey (reference) | `data/patterns/upsc-banking.json` |
 | SEBI Grade A | Scaffolded | SEBI + PIB + RBI | `data/patterns/sebi-grade-a.json` |
 | NABARD Grade A | Scaffolded | NABARD + PIB + RBI | `data/patterns/nabard-grade-a.json` |
 
@@ -51,15 +54,16 @@ Drop an exam's previous-year GA papers (as `{"question","options",...}` JSON) in
 `data/questions/pyq/<exam-slug>/` and re-run `derive_weightage.py` to refresh its mix.
 Until that is done, an exam uses the documented research-default weightage in its taxonomy.
 
-### Static sources — Economic Survey (yearly) & Yojana (monthly)
+### Reference sources — Economic Survey (yearly)
 
-The Economic Survey is processed **once a year** and Yojana **once a month**, but
-questions are generated **weekly**. To fold this material into weekly papers *without
-repeating facts and while respecting GA weightage*, each static source is split into
-topic-tagged **segments**, and a **rotation ledger** hands each segment to exactly one
-week — so a fact is asked at most once.
+The Economic Survey is foundational, self-contained, exam-critical reading, so it is
+kept **separate** from the weekly current-affairs papers: it gets its **own stored
+section-wise summary and its own dedicated quiz**, rendered as a standalone section on
+the exam page (`docs/static/<exam>/economic-survey-<year>.html`). Weekly papers are
+built from that week's material only — Economic Survey facts never mix into them — so
+"what I learned this week" stays cleanly distinct from foundational ES knowledge.
 
-These PDFs are **downloaded, text-extracted (pdfplumber), and summarised
+These PDFs are **downloaded, text-extracted (pdfplumber), and summarised + quizzed
 automatically** — and the scheduler keeps them current with no manual step:
 
 ```bash
@@ -85,15 +89,14 @@ extractor ingests whatever is there:
 python pipeline/static_fetch.py --exam upsc-banking --extract-only
 ```
 
-Under the hood the extracted text is handed to `static_runner.py`, which builds the
-section-wise summary + segments (you can also run it directly on a text file via
-`--from-file`). Output is stored under `data/static/<exam>/` (a section-wise `.md`
-summary + a `.json` of segments). On each weekly run, `daily_runner` calls
-`select_for_week()` to claim the next unused segments (preferring the current month's
-Yojana), marks them consumed in `data/static/<exam>/rotation.json`, and the weekly
-prompt builds a fixed quota (`DEFAULT_WEEKLY_STATIC_QUOTA`, default 6) of MCQs from
-them — folded **into** the topic distribution (they replace current-affairs questions
-in the same topics, not add to them). Re-running a week is idempotent.
+Under the hood the extracted text is handed to `static_runner.py`, which (1) builds a
+section-wise summary, and (2) curates a **dedicated quiz** from that summary (default
+30 MCQs; `--questions N` to change). You can also run it directly on a text file via
+`--from-file`. Output is stored under `data/static/<exam>/`: a section-wise `.md`
+summary, a `.json` of topic-tagged segments, and a `.quiz.json` of the dedicated MCQs.
+The site builder (`load_static_sources` → `render_static_page`) then publishes each
+source as its own page with the summary + quiz, linked under **Reference sources** on
+the exam page. Re-running is idempotent (it overwrites that edition's files).
 
 ### Study cycles & archive
 
@@ -113,13 +116,21 @@ no other account can push; any future collaborator must open a PR the owner appr
 
 ## Setup
 
-### 1. Install Ollama and pull the model
+### 1. Install Ollama and pull the models
+
+The pipeline calls a strong primary model and falls back to small local models if it
+is unavailable (see `OLLAMA_MODELS` in `config.py`). Defaults:
 
 ```bash
 # Install from https://ollama.com
-ollama pull qwen3.5:9b
-ollama pull gemma3:12b
+ollama pull gpt-oss:120b-cloud   # primary (Ollama Cloud) — summaries + MCQs
+ollama pull qwen3.5:2b           # local fallback
+ollama pull qwen3.5:0.8b         # last-resort fallback
 ```
+
+Cloud models (`*-cloud`) run via Ollama's hosted tier and don't need to appear in
+`ollama list` to work. Swap in any installed model by editing `OLLAMA_MODELS` or
+setting the `OLLAMA_MODELS` env var (see *Configuration*).
 
 ### 2. Install Python dependencies
 
@@ -149,7 +160,9 @@ This will:
 
 ### Step 2 — Run the pipeline
 
-**Auto mode** (runs the current weekly slot immediately, then schedules every 6 hours):
+**Auto mode** — catches up any missed weeks + refreshes news now, then schedules the
+**weekly run (Mon 00:00, all exams)** and the **daily news refresh (00:00)**, pushing
+after each so the live site redeploys:
 
 ```bash
 python run.py
@@ -158,16 +171,27 @@ python run.py
 **Manual weekly mode**:
 
 ```bash
-python pipeline/daily_runner.py --week 1                       # RBI Grade B (default)
-python pipeline/daily_runner.py --week 1 --exam upsc-banking   # UPSC / Banking
+python pipeline/daily_runner.py --week 28 --all-exams          # every active exam
+python pipeline/daily_runner.py --week 28                      # RBI Grade B (default)
+python pipeline/daily_runner.py --week 28 --exam upsc-banking  # one exam
 ```
+
+`--all-exams` runs each active exam independently with **retry + skip-on-failure**: a
+transient failure is retried a few times, and if an exam still fails it is logged and
+skipped so the rest of the pipeline continues. For a week that's thin on one source
+(e.g. few PIB items), questions are built from whatever source(s) *do* have content —
+generation is only refused when every source is title-only.
 
 `--exam` selects which exam's pipeline to run (weekly mode only). Each exam pulls
 its own sources (see *Multi-exam architecture*), uses its own GA weightage, and
 writes to `data/summaries/<exam-slug>/` and `data/questions/generated/<exam-slug>/`,
-which the site then renders under that exam's tab. The default exam (`rbi-grade-b`)
+which the site then renders on that exam's page. The default exam (`rbi-grade-b`)
 keeps the original flat output layout. Run `scripts/build_site.py` afterwards to
 publish the new content.
+
+To generate an exam's **reference sources** (e.g. the Economic Survey) — a standalone
+summary + dedicated quiz, separate from the weekly papers — see *Reference sources*
+above (`python pipeline/static_fetch.py --exam upsc-banking`).
 
 **Backfill missing weekly outputs from available cached content**:
 
@@ -191,62 +215,72 @@ questions only from the facts available in the remaining detail content.
 python pipeline/daily_runner.py --day 1
 ```
 
-**Force-run the scheduler's current weekly slot immediately**:
+**Force-run a slot immediately** (without waiting for the schedule):
 
 ```bash
-python run.py --run-now
+python run.py --run-now    # process the current completed week now (all exams) + publish
+python run.py --news-now   # refresh + publish the news digest now
 ```
 
-## Weekly Range
+## Week numbering — two systems, one source of truth
 
-Weekly runs start at **December 1, 2025** and continue **open-ended** in 7-day
-blocks — a new week is published every week with no end date.
+There are two week numbers and it's worth keeping them straight:
 
-| Week | Date range |
-|------|------------|
-| 1 | 2025-12-01 to 2025-12-07 |
-| 2 | 2025-12-08 to 2025-12-14 |
-| ... | ... |
-| N | rolling — the most recent fully-completed week |
+- **Pipeline index (`--week N`)** — a simple 1-based counter of 7-day blocks from
+  `WEEK_RANGE_START` (`2025-12-01`). So `--week 1` = 1–7 Dec 2025, `--week 28` =
+  8–14 Jun 2026. This is what you pass on the command line and what the scheduler
+  tracks in `data/state.json`. It is open-ended: leave `WEEK_RANGE_END = ""` (the
+  default) for a rolling schedule, or set a date (e.g. `"2026-05-31"`) to cap it.
+- **Display number (study cycle)** — what the **site** shows. Weeks are regrouped
+  into a yearly **study cycle** that starts on the **last Monday of December** and
+  renumbered from Week 1 within that cycle, so **Week 1 of the 2025–26 cycle is the
+  week of 29 Dec 2025**. Weeks before the current cycle roll into each exam's
+  **Archive** automatically, and a fresh Week 1 begins every December with no manual
+  migration (`config.current_cycle_start` / `cycle_start_for` / `cycle_label`).
 
-This is controlled by `WEEK_RANGE_START` / `WEEK_RANGE_END` in `config.py`. Leave
-`WEEK_RANGE_END = ""` (the default) for the open-ended rolling schedule; set it to
-a date (e.g. `"2026-05-31"`) to cap the schedule at a fixed final week.
+The pipeline index and the dates are the durable identity (files are keyed by date
+range, e.g. `2026-06-08_to_2026-06-14`); the display number is derived at build time.
 
-The scheduler only advances after a week is complete. When it has caught up to the
-most recent completed week it simply waits for the next 7-day block to elapse, then
-processes and publishes it on the next 6-hour scheduler tick.
-
-## Week numbering
-
-Content is organised into **weekly** 7-day blocks, numbered within a yearly
-**study cycle**. A cycle starts on the **last Monday of December** and runs ~52
-weeks, so **Week 1 of the 2025–26 cycle is the week of 29 Dec 2025**. Weeks before
-the current cycle's start roll into each exam's **Archive** automatically, and a
-fresh Week 1 begins every December with no manual migration. See
-*Study cycles & archive* above for the underlying helpers.
+The scheduler only advances after a week is complete. It catches any backlog up at
+startup, then waits for the **Monday 00:00** trigger to process the week that just
+ended. If every exam fails for a week (e.g. a network outage), it stays on that week
+and retries on the next trigger rather than skipping it.
 
 ## Output files
+
+All outputs live under `data/` (gitignored — only the rendered `docs/` site is
+committed). The **default exam** (`rbi-grade-b`) keeps the original flat layout; every
+other exam is namespaced under its `<exam-slug>`.
 
 | Path | Contents |
 |------|----------|
 | `data/questions/all_ga.json` | All scraped GA MCQs (deduplicated) |
-| `data/questions/raw/` | Raw per-source question JSONs |
+| `data/questions/pyq/<exam-slug>/` | Previous-year GA papers used to derive per-exam weightage |
+| **Weekly (default exam)** | |
+| `data/summaries/YYYY-MM-DD_to_YYYY-MM-DD.md` | Weekly GA summary (markdown) |
 | `data/questions/generated/YYYY-MM-DD_to_YYYY-MM-DD-qs.json` | AI-generated weekly MCQs |
-| `data/questions/pdf/YYYY-MM-DD_to_YYYY-MM-DD-qs.pdf` | Shareable weekly MCQ PDF with answer key |
-| `data/summaries/YYYY-MM-DD_to_YYYY-MM-DD.md` | Weekly GA summary in markdown |
-| `data/summaries/pdf/YYYY-MM-DD_to_YYYY-MM-DD-summary.pdf` | Shareable weekly summary PDF |
-| `data/questions/generated/YYYY-MM-qs.json` | AI-generated monthly MCQs when using `--day` |
-| `data/questions/pdf/YYYY-MM-qs.pdf` | Shareable monthly MCQ PDF with answer key |
-| `data/summaries/YYYY-MM.md` | Monthly GA summary in markdown |
-| `data/summaries/pdf/YYYY-MM-summary.pdf` | Shareable monthly summary PDF |
-| `data/scraped/YYYY-MM/pib.json` | Cached PIB scrape data for the month |
-| `data/scraped/YYYY-MM/rbi.json` | Cached RBI scrape data for the month |
+| `data/summaries/pdf/…-summary.pdf`, `data/questions/pdf/…-qs.pdf` | Shareable weekly PDFs |
+| **Weekly (other exams)** | |
+| `data/summaries/<exam-slug>/<key>.md` | Per-exam weekly summary |
+| `data/questions/generated/<exam-slug>/<key>-qs.json` | Per-exam weekly MCQs |
+| **Reference sources (Economic Survey)** | |
+| `data/static/<exam-slug>/pdfs/` | Downloaded/dropped source PDFs |
+| `data/static/<exam-slug>/sources/<kind>-<key>.txt` | Extracted PDF text |
+| `data/static/<exam-slug>/<kind>-<key>.md` | Section-wise summary |
+| `data/static/<exam-slug>/<kind>-<key>.json` | Topic-tagged segments |
+| `data/static/<exam-slug>/<kind>-<key>.quiz.json` | Dedicated quiz MCQs |
+| **Monthly mode (`--day`)** | |
+| `data/summaries/YYYY-MM.md`, `data/questions/generated/YYYY-MM-qs.json` | Monthly summary + MCQs |
+| **Caches & state** | |
+| `data/scraped/<period>/…` , `data/scraped/<exam-slug>/<key>/…` | Cached source scrapes |
 | `data/chunk_notes/<period-key>/chunk-NNN.json` | Cached condensed notes for oversized periods |
+| `data/llm_raw/<key>-*.md` | Raw Ollama responses (for debugging/recovery) |
 | `data/raw/edutap_ga.pdf` | Downloaded EduTap GA PDF |
-| `data/state.json` | Scheduler state (current day) |
+| `data/news/latest.json`, `data/news/YYYY-MM-DD.json` | News digest + dated snapshots |
+| `data/news/seen.json` | Dedup ledger — items already summarised, so daily runs only LLM new ones |
+| `data/state.json` | Scheduler state (current pipeline week) |
 
-The daily runner checks `data/scraped/YYYY-MM/` before scraping. If cached PIB/RBI data exists, it skips that scraper and goes straight to prompt building and Ollama. To force a fresh scrape:
+The daily runner checks the relevant `data/scraped/` cache before scraping. If cached source data exists, it skips that scraper and goes straight to prompt building and Ollama. To force a fresh scrape:
 
 ```bash
 python pipeline/daily_runner.py --week 1 --refresh-cache
@@ -254,7 +288,13 @@ python pipeline/daily_runner.py --week 1 --refresh-cache
 
 If the scraped period is too large for the model context, the runner automatically splits the source material into chunks, summarizes each chunk into exam-focused notes, caches those notes in `data/chunk_notes/`, and builds the final summary/MCQ prompt from the condensed notes. This lets large periods use the whole scrape without silently truncating the tail.
 
-To email the generated summary and question PDFs after a run, copy `.env.example` to `.env` and fill in your SMTP credentials:
+### Optional: email the PDFs (manual only)
+
+> Emailing is **no longer part of the scheduled pipeline** — the live site is the
+> delivery mechanism now. The code and CLI flags remain for ad-hoc manual use; the
+> scheduler never emails (it runs with no recipients).
+
+To email the generated summary and question PDFs after a *manual* run, copy `.env.example` to `.env` and fill in your SMTP credentials:
 
 ```bash
 cp .env.example .env
@@ -292,19 +332,27 @@ publishes it as an "In the news" page on the site, with cited sources and per-ex
 relevance tags.
 
 - **Sources:** Economic Times, Mint, Hindustan Times — read via their public **RSS
-  feeds**. Business Standard is excluded (it blocks automated access and is hard
-  paywalled).
+  feeds** — plus **Business Standard**, whose own RSS is Akamai-blocked (403) so it is
+  ingested via a Google-News site-restricted feed that links back to the original BS
+  article.
 - **What is stored:** only RSS metadata — headline, source, date, and a short blurb.
   Full copyrighted article bodies are **never** scraped or republished.
 - **Self-contained summaries:** Ollama rewrites each item into an original 2–3
   sentence, exam-focused summary shown inline on the site (no outbound links) and
   credited to the originating outlet. Without Ollama, the RSS blurb is used as-is.
-- **Rolling 2-day window:** `NEWS_LOOKBACK_DAYS = 1` keeps only today + yesterday,
-  so anything that didn't make yesterday's digest surfaces today and stale items
-  roll off the next day. Widen with `--days` for a one-off catch-up.
+- **Headline window + weekly fold:** the digest fetches a rolling week
+  (`NEWS_LOOKBACK_DAYS = 7`), but the site shows only the last
+  `NEWS_HEADLINE_DAYS + 1` days (today + yesterday) in the main list; the rest of the
+  week sits in a collapsible **In this week** section. So anything that missed
+  yesterday's list surfaces today, stale items roll off, and nothing within the week is
+  lost. Widen the fetch with `--days` for a one-off catch-up.
 - **Exam tagging:** each item is screened for relevance to **RBI Grade B, SEBI
   Grade A, NABARD Grade A, and UPSC / Banking**. A keyword heuristic provides the
   baseline; Ollama refines the tags and topic when reachable.
+- **Runs daily, no wasted effort:** the news refresh fires every day at 00:00, but a
+  dedup ledger (`data/news/seen.json`, keyed by URL) remembers items already
+  summarised, so each run spends the LLM **only on genuinely new articles** — the same
+  story isn't re-summarised day after day. The ledger is pruned to the lookback window.
 
 Run it:
 
@@ -322,9 +370,11 @@ Output:
 | `data/news/YYYY-MM-DD.json` | Dated snapshot for history |
 
 The site build renders `data/news/latest.json` into `docs/news.html` (filterable by
-exam). `run.py` refreshes the news digest automatically after each weekly cycle; use
+exam; the filter applies to both the headline list and *In this week*). `run.py`
+refreshes the news digest automatically after each weekly cycle; use
 `python run.py --build-only --with-news` to refresh it on demand. Configure feeds,
-exams, and lookback in `config.py` (`NEWS_FEEDS`, `NEWS_EXAMS`, `NEWS_LOOKBACK_DAYS`).
+exams, and windows in `config.py` (`NEWS_FEEDS`, `NEWS_EXAMS`, `NEWS_LOOKBACK_DAYS`,
+`NEWS_HEADLINE_DAYS`).
 
 ## Website
 
@@ -344,28 +394,38 @@ This writes a fast, fully-static site to `docs/`:
 
 | Path | Contents |
 |------|----------|
-| `docs/index.html` | Landing page, **categorised by exam**, with each exam's chronological week index |
+| `docs/index.html` | Overview landing page with an exam card per active exam |
+| `docs/exams/<exam-slug>.html` | Per-exam page: current cycle's weeks, **Reference sources**, and an **Archive** of past cycles |
 | `docs/weeks/<exam-slug>/<key>.html` | Per-week page: descriptive summary + interactive MCQ quiz |
+| `docs/static/<exam-slug>/<kind>-<key>.html` | Reference-source page (e.g. Economic Survey): summary + its own dedicated quiz |
+| `docs/news.html` | "In the news" digest (filterable by exam) |
 | `docs/assets/style.css`, `docs/assets/app.js` | Minimalist styling + quiz logic |
 
-The landing page groups weeks **per exam** (RBI Grade B, UPSC / Banking, …) with a
-jump-pill nav; an exam with no published weeks yet shows a "coming soon" panel. Each
-week page renders the summary with topic sections, highlighted figures/dates, and ⭐
-priority markers, followed by an in-browser practice quiz (pick an option to see the
-correct answer, with a running score).
+A persistent top nav links every active exam plus News, so you can switch exams from
+any page. The overview page shows an exam card each (RBI Grade B, UPSC / Banking, …);
+an exam with no published weeks yet shows a "coming soon" panel. Each week page renders
+the summary with topic sections, highlighted figures/dates, ⭐ priority markers, and a
+proper table when the model emits one — followed by an in-browser practice quiz (pick an
+option to see the correct answer, with a running score). Reference-source pages reuse the
+same summary + quiz layout but are listed separately so foundational material stays
+distinct from the weekly papers.
 
-The site reads each exam's content from `data/summaries/<exam-slug>/` and
-`data/questions/generated/<exam-slug>/` (RBI Grade B keeps the original flat layout for
-backward compatibility).
+The site reads each exam's weekly content from `data/summaries/<exam-slug>/` and
+`data/questions/generated/<exam-slug>/`, and its reference sources from
+`data/static/<exam-slug>/` (RBI Grade B keeps the original flat layout for backward
+compatibility).
 
 ### Automatic publishing
 
-`run.py` rebuilds the site after every completed week. Pass `--publish` to also
-commit and push the regenerated `docs/` so the live site updates each week:
+In **auto mode** (`python run.py`), every weekly run (Mon 00:00) and every daily news
+refresh (00:00) rebuilds `docs/` and **commits + pushes** automatically, so GitHub
+Pages redeploys without any manual step — pushing is always on in auto mode. (For the
+manual `--run-now` / `--news-now` triggers, add `--publish` to also push.)
 
 ```bash
-python run.py --publish            # auto-scheduled: process + rebuild + push each week
+python run.py                      # auto: weekly Mon 00:00 + daily news 00:00, both push
 python run.py --run-now --publish  # process the current week now, then push
+python run.py --news-now --publish # refresh news now, then push
 ```
 
 Raw scraped content in `data/` stays gitignored (private); only the rendered `docs/`
@@ -375,7 +435,7 @@ site is committed.
 
 The site is already live at **https://votrascii.github.io/govt-exam-prep/**, served by
 GitHub Pages from `docs/`. The included `.github/workflows/pages.yml` redeploys it
-automatically on every push that touches `docs/` (typically `run.py --publish`).
+automatically on every push that touches `docs/`.
 
 Pages is configured with **Source: GitHub Actions** (`build_type: workflow`). This
 was a one-time setup; you only need to redo it if you recreate the repo:
@@ -395,20 +455,22 @@ was a one-time setup; you only need to redo it if you recreate the repo:
 ## Configuration
 
 Edit `config.py` to change:
-- Ollama URL / model names
-- Ollama model fallback order, context window, and read timeout
+- Ollama URL / model names (`OLLAMA_MODEL_PRIMARY`, `OLLAMA_MODEL_FALLBACK`) and the
+  `OLLAMA_MODELS` fallback order, context window, and read timeout
 - Large-period chunking via `CHUNK_CONTENT_WORDS` and `CHUNK_SUMMARY_WORDS`
 - Source-material budget via `MAX_CONTENT_WORDS` (raised to **90,000** so far more
   source text reaches the model before any truncation → richer, fuller summaries)
 - The exam registry via `EXAMS` / `DEFAULT_EXAM` (see *Multi-exam architecture*)
-- Weekly range via `WEEK_RANGE_START` and `WEEK_RANGE_END`
-- Scheduler frequency via `SCHEDULER_INTERVAL_HOURS`
-- Source URLs
-- Fuzzy dedup threshold
-- Max content word limit for Ollama prompt
+- Weekly range via `WEEK_RANGE_START` and `WEEK_RANGE_END` (the auto schedule itself is
+  fixed: weekly Mon 00:00, news daily 00:00 — see *Automatic publishing*)
+- News feeds and windows via `NEWS_FEEDS`, `NEWS_EXAMS`, `NEWS_LOOKBACK_DAYS`,
+  `NEWS_HEADLINE_DAYS`
+- Reference-source (Economic Survey) extraction caps via `STATIC_MAX_WORDS`,
+  `STATIC_MAX_PAGES_PER_PDF`, and the source URLs (`ECON_SURVEY_*`)
+- Fuzzy dedup threshold (`FUZZY_THRESHOLD`)
 
 You can also override the model order without editing files:
 
 ```bash
-OLLAMA_MODELS="llama3.1:latest,qwen3.5:9b" python pipeline/daily_runner.py --day 1
+OLLAMA_MODELS="gpt-oss:120b-cloud,qwen3.5:2b" python pipeline/daily_runner.py --week 28
 ```
