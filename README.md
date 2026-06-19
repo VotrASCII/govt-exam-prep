@@ -89,11 +89,13 @@ extractor ingests whatever is there:
 python pipeline/static_fetch.py --exam upsc-banking --extract-only
 ```
 
-Under the hood the extracted text is handed to `static_runner.py`, which (1) builds a
-section-wise summary, and (2) curates a **dedicated quiz** from that summary (default
-30 MCQs; `--questions N` to change). You can also run it directly on a text file via
-`--from-file`. Output is stored under `data/static/<exam>/`: a section-wise `.md`
-summary, a `.json` of topic-tagged segments, and a `.quiz.json` of the dedicated MCQs.
+Under the hood the extracted text is handed to `static_runner.py`. The Economic Survey
+(700+ pages) is summarised **section-wise** — each of the standard thematic chapters
+(`ECON_SURVEY_SECTIONS`) gets its own independent summary pass, then a **dedicated quiz
+of N MCQs per section** (default 30 → ~360 total; `--questions N` to change). You can
+also run it directly on a text file via `--from-file`. Output is stored under
+`data/static/<exam>/`: a section-wise `.md` summary and a `.quiz.json` of the MCQs
+(each tagged with its section, so the site groups them).
 The site builder (`load_static_sources` → `render_static_page`) then publishes each
 source as its own page with the summary + quiz, linked under **Reference sources** on
 the exam page. Re-running is idempotent (it overwrites that edition's files).
@@ -123,7 +125,7 @@ is unavailable (see `OLLAMA_MODELS` in `config.py`). Defaults:
 
 ```bash
 # Install from https://ollama.com
-ollama pull gpt-oss:120b-cloud   # primary (Ollama Cloud) — summaries + MCQs
+ollama pull gpt-oss:20b-cloud   # primary (Ollama Cloud) — summaries + MCQs
 ollama pull qwen3.5:2b           # local fallback
 ollama pull qwen3.5:0.8b         # last-resort fallback
 ```
@@ -472,5 +474,5 @@ Edit `config.py` to change:
 You can also override the model order without editing files:
 
 ```bash
-OLLAMA_MODELS="gpt-oss:120b-cloud,qwen3.5:2b" python pipeline/daily_runner.py --week 28
+OLLAMA_MODELS="gpt-oss:20b-cloud,qwen3.5:2b" python pipeline/daily_runner.py --week 28
 ```

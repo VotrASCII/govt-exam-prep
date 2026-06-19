@@ -77,7 +77,16 @@
   function render() {
     answered = 0; correct = 0;
     wrap.innerHTML = '';
+    let curSection = null;
     questions.forEach((q, i) => {
+      // Group questions under their source section (e.g. Economic Survey chapters).
+      if (q.section && q.section !== curSection) {
+        curSection = q.section;
+        const h = document.createElement('h3');
+        h.className = 'quiz-section';
+        h.textContent = q.section;
+        wrap.appendChild(h);
+      }
       const card = document.createElement('div');
       card.className = 'q';
       const stem = document.createElement('div');
