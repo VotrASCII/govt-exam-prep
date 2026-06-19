@@ -81,6 +81,70 @@ def save_source(
     return d / f"{kind}-{key}.json"
 
 
+# ── dedicated quiz storage (questions asked from a static source itself) ────
+# Economic Survey is foundational and self-contained, so its MCQs live with the
+# source as a *separate* quiz — not folded into the weekly current-affairs paper.
+
+def quiz_path(exam_slug: str, kind: str, key: str) -> Path:
+    return static_dir(exam_slug) / f"{kind}-{key}.quiz.json"
+
+
+def save_quiz(exam_slug: str, kind: str, key: str, questions: list[dict]) -> Path:
+    d = static_dir(exam_slug)
+    d.mkdir(parents=True, exist_ok=True)
+    p = quiz_path(exam_slug, kind, key)
+    p.write_text(json.dumps(questions, indent=2, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def load_quiz(exam_slug: str, kind: str, key: str) -> list[dict]:
+    p = quiz_path(exam_slug, kind, key)
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    return [q for q in data if isinstance(q, dict) and q.get("question")] if isinstance(data, list) else []
+
+
+def list_sources(exam_slug: str) -> list[dict]:
+    """Enumerate stored static sources (summary + dedicated quiz) for an exam.
+
+    Returns newest-first dicts: {kind, key, summary_md, questions, segment_count}.
+    Used by the site builder to render each source's own section + quiz.
+    """
+    d = static_dir(exam_slug)
+    if not d.exists():
+        return []
+    out: list[dict] = []
+    for jpath in sorted(d.glob("*.json")):
+        name = jpath.name
+        if name == "rotation.json" or name.endswith(".quiz.json"):
+            continue
+        stem = jpath.stem  # e.g. "economic-survey-2025"
+        try:
+            data = json.loads(jpath.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        kind, key = data.get("kind", ""), data.get("key", "")
+        md = d / f"{stem}.md"
+        out.append(
+            {
+                "kind": kind,
+                "key": key,
+                "stem": stem,
+                "summary_md": md.read_text(encoding="utf-8") if md.exists() else "",
+                "questions": load_quiz(exam_slug, kind, key),
+                "segment_count": len(data.get("segments", [])),
+            }
+        )
+    # Economic Survey (yearly) first, then by key descending (newest first).
+    out.sort(key=lambda s: (s["kind"] != "economic-survey", s["key"]), reverse=False)
+    out.sort(key=lambda s: s["key"], reverse=True)
+    return out
+
+
 def load_all_segments(exam_slug: str) -> list[dict]:
     d = static_dir(exam_slug)
     if not d.exists():

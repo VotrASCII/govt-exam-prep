@@ -150,11 +150,23 @@ def fetch_yojana(exam: str, year: int, month: int) -> list[Path]:
 
 # ── ingest: PDFs → text → static_runner ─────────────────────────────────────
 
+# File-name prefixes a given source kind may have been saved under. The
+# downloader writes Economic Survey PDFs as "econsurvey-<year>.pdf", but the
+# canonical kind is "economic-survey" — match both so ingest finds them.
+_KIND_PREFIXES = {
+    "economic-survey": ("economic-survey", "econsurvey"),
+    "yojana": ("yojana",),
+}
+
+
 def _matching_pdfs(exam: str, kind: str, key: str) -> list[Path]:
     d = pdf_dir(exam)
     if not d.exists():
         return []
-    return sorted(d.glob(f"{kind}-{key}*.pdf"))
+    found: list[Path] = []
+    for prefix in _KIND_PREFIXES.get(kind, (kind,)):
+        found.extend(d.glob(f"{prefix}-{key}*.pdf"))
+    return sorted(set(found))
 
 
 def ingest(exam: str, kind: str, key: str) -> bool:
