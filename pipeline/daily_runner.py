@@ -287,6 +287,37 @@ def _validate_detail_content(source: str, items: list[dict]) -> None:
     )
 
 
+def _ensure_some_usable_content(
+    named_sources: list[tuple[str, list[dict]]], period_label: str
+) -> None:
+    """Proceed as long as AT LEAST ONE source has usable detail content.
+
+    Sources (e.g. PIB and RBI) are combined, but a given week may be thin on one
+    of them. Rather than refusing the whole week when a single source is weak, we
+    print each source's status and only raise if *no* source has usable content —
+    in which case there is genuinely nothing but titles to work with. Downstream
+    content building already filters to usable items, so generation proceeds from
+    whatever is available.
+    """
+    total_usable = 0
+    for name, items in named_sources:
+        if not items:
+            print(f"  [WARN] No {name.upper()} items for {period_label}.")
+            continue
+        _t, usable, _cov, _w = _detail_content_stats(items)
+        print(f"  {_detail_content_status(name, items)}")
+        if usable == 0:
+            print(f"  [WARN] {name.upper()} has no usable detail content — "
+                  f"skipping it; questions will use the other source(s).")
+        total_usable += usable
+    if total_usable == 0:
+        raise RuntimeError(
+            f"No usable detail content from any source for {period_label} "
+            "(only titles/empty items). Refusing to generate from titles alone — "
+            "re-run with --refresh-cache after fixing the scraper or network issue."
+        )
+
+
 def _format_rbi_content(items: list[dict]) -> str:
     parts = []
     for item in items:
@@ -326,6 +357,17 @@ def _rbi_block(item: dict) -> str:
     return "\n".join(parts)
 
 
+def _format_block_for(canon: str, item: dict) -> str:
+    """Format one scraped item identically regardless of which exam is asking, so a
+    shared source produces byte-identical blocks → its condensation cache is reused
+    across exams (the cache keys on content hash). Falls back to a generic format."""
+    if canon == "pib":
+        return _pib_block(item)
+    if canon == "rbi":
+        return _rbi_block(item)
+    return _generic_block(item, canon.upper())
+
+
 def _source_blocks(pib_releases: list[dict], rbi_items: list[dict]) -> list[str]:
     blocks = ["=== PIB Press Releases ==="]
     blocks.extend(_pib_block(release) for release in _usable_detail_items(pib_releases))
@@ -361,8 +403,43 @@ def _scrape_cache_path(source: str, year: int, month: int) -> Path:
     return _scrape_cache_dir(year, month) / f"{source}.json"
 
 
+# Several exams draw on the SAME upstream source — e.g. RBI Grade B's "pib" and
+# UPSC's "pib_all" are both the all-ministry PIB scrape (scrape_pib_range queries
+# every ministry regardless). Cache by a canonical source key so a source+period is
+# scraped at most once and shared across exams; only question generation differs per
+# exam (by weightage). Period scrape cache is therefore exam-INDEPENDENT.
+_CANONICAL_SOURCE = {
+    "pib": "pib",
+    "pib_all": "pib",
+    "rbi": "rbi",
+    "econsurvey": "econsurvey",
+}
+
+
+def _canonical_source(source: str) -> str:
+    return _CANONICAL_SOURCE.get(source, source)
+
+
+# (canonical_source, output_key) pairs scraped during THIS process. Lets a single
+# --all-exams / --refresh-cache run scrape each source once even across exams.
+_SCRAPED_THIS_RUN: set[tuple[str, str]] = set()
+
+
+def _use_period_cache(source: str, output_key: str, refresh_cache: bool) -> bool:
+    """Use the cache unless a refresh was asked — but still reuse a scrape we
+    already did this run, so shared sources aren't re-fetched per exam."""
+    if not refresh_cache:
+        return True
+    return (_canonical_source(source), output_key) in _SCRAPED_THIS_RUN
+
+
+def _mark_scraped(source: str, output_key: str) -> None:
+    _SCRAPED_THIS_RUN.add((_canonical_source(source), output_key))
+
+
 def _period_scrape_cache_path(source: str, output_key: str) -> Path:
-    return SCRAPED_DIR / output_key / f"{source}.json"
+    # Canonical source name → "pib" and "pib_all" share one file across exams.
+    return SCRAPED_DIR / output_key / f"{_canonical_source(source)}.json"
 
 
 def _load_scrape_cache(source: str, year: int, month: int) -> list[dict] | None:
@@ -445,6 +522,7 @@ def _save_period_scrape_cache(source: str, output_key: str, items: list[dict]) -
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(items, f, indent=2, ensure_ascii=False)
     tmp_path.replace(path)
+    _mark_scraped(source, output_key)
     print(f"  Cached weekly {source.upper()} data: {len(items)} items ({path})")
 
 
@@ -1195,6 +1273,100 @@ def _summarize_large_content(
     return result
 
 
+def _neutral_source_chunk_prompt(
+    source_label: str, chunk: str, index: int, total: int, period_label: str
+) -> str:
+    return f"""\
+You are extracting General Awareness facts for Indian government competitive exams
+from {source_label} for {period_label}. This is chunk {index} of {total}.
+
+Output concise markdown bullet notes, maximum {CHUNK_SUMMARY_WORDS} words. Preserve
+EVERY exact date, name, number, scheme, report, institution, rate, penalty, ranking
+and place. Do not invent facts not in the text. Do not write MCQs. These are neutral
+fact notes that several exams will reuse, so don't tailor them to one exam.
+
+RAW CHUNK {index}/{total}:
+{chunk}
+"""
+
+
+def _condense_source(
+    canon: str,
+    label: str,
+    blocks: list[str],
+    period_label: str,
+    output_key: str | None,
+) -> str:
+    """Condense ONE source's blocks into neutral notes, cached by (output_key,
+    canonical source) so every exam that uses this source reuses the work instead
+    of re-summarising the same material. Returns the combined notes."""
+    key = output_key or "period"
+    cache_dir = CHUNK_NOTES_DIR / key
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    src_hash = _source_fingerprint(blocks)
+    manifest = cache_dir / f"src-{canon}.json"
+    if manifest.exists():
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            if data.get("hash") == src_hash and data.get("notes"):
+                print(f"  Reusing shared condensed {canon.upper()} notes (already summarised).")
+                return data["notes"]
+        except Exception:  # noqa: BLE001
+            pass
+
+    chunks = _chunk_blocks(blocks, CHUNK_CONTENT_WORDS)
+    print(f"  Condensing {canon.upper()} once for all exams: {len(chunks)} chunk(s) ...")
+    notes: list[str] = []
+    for index, chunk in enumerate(chunks, 1):
+        content_hash = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+        cpath = cache_dir / f"src-{canon}-chunk-{index:03d}.json"
+        cached = _load_chunk_note(cpath, content_hash)
+        if cached:
+            print(f"    [{index}/{len(chunks)}] cached")
+            notes.append(cached)
+            continue
+        print(f"    [{index}/{len(chunks)}] condensing ({len(chunk.split())} words)")
+        prompt = _neutral_source_chunk_prompt(label, chunk, index, len(chunks), period_label)
+        note = _truncate_to_words(clean_summary_markdown(call_ollama_with_fallback(prompt)), CHUNK_SUMMARY_WORDS)
+        _save_chunk_note(cpath, content_hash, note)
+        notes.append(note)
+
+    combined = "\n\n".join(f"=== {label} notes (part {i}) ===\n{n}" for i, n in enumerate(notes, 1))
+    manifest.write_text(json.dumps({"hash": src_hash, "notes": combined}, ensure_ascii=False), encoding="utf-8")
+    return combined
+
+
+def _assemble_exam_content(
+    named_sources: list[tuple[str, str, list[str]]],
+    period_label: str,
+    output_key: str | None,
+) -> str:
+    """Build one exam's prompt content from its sources. A source that's large on its
+    own is condensed (shared across exams via _condense_source); a small one is used
+    raw. Only question generation then differs per exam — the heavy summarising of a
+    shared source (e.g. all-ministry PIB) happens exactly once per week."""
+    final_budget = _token_budget_words()
+    parts: list[str] = []
+    for canon, label, blocks in named_sources:
+        if not blocks:
+            continue
+        words = sum(len(b.split()) for b in blocks)
+        if words > CHUNK_CONTENT_WORDS:
+            parts.append(_condense_source(canon, label, blocks, period_label, output_key))
+        else:
+            parts.append(f"=== {label} ===\n" + "\n\n".join(blocks))
+
+    combined = "\n\n".join(parts)
+    raw_words = len(combined.split())
+    if raw_words > final_budget:
+        combined = _truncate_to_words(combined, final_budget)
+        print(f"  Assembled content: {len(combined.split())} words (truncated to budget {final_budget})")
+    else:
+        print(f"  Assembled content: {raw_words} words (budget: {final_budget})")
+    return combined
+
+
 def prepare_prompt_content(
     pib_releases: list[dict],
     rbi_items: list[dict],
@@ -1216,23 +1388,19 @@ def prepare_prompt_content(
             f"(<{MIN_DETAIL_CONTENT_WORDS} words)"
         )
 
-    blocks = _source_blocks(pib_releases, rbi_items)
-    combined = "\n\n".join(blocks)
-    raw_words = len(combined.split())
-    final_budget = _token_budget_words()
-    print(f"  Raw merged content: {raw_words} words")
-
-    if raw_words <= final_budget:
-        print(f"  Combined content: {raw_words} words (budget: {final_budget})")
-        return combined
-
-    summarized = _summarize_large_content(blocks, month_name, year, month, output_key)
-    summarized_words = len(summarized.split())
-    if summarized_words > final_budget:
-        summarized = _truncate_to_words(summarized, final_budget)
-        summarized_words = len(summarized.split())
-    print(f"  Condensed content: {summarized_words} words (budget: {final_budget})")
-    return summarized
+    # Build PIB and RBI blocks separately so the (shared) PIB scrape is condensed
+    # once per week and reused by every exam that draws on PIB.
+    period_label = _period_display(month_name, year)
+    pib_blocks = [_pib_block(r) for r in _usable_detail_items(pib_releases)]
+    rbi_blocks = [_rbi_block(it) for it in _usable_detail_items(rbi_items)]
+    return _assemble_exam_content(
+        [
+            ("pib", "PIB Press Releases", pib_blocks),
+            ("rbi", "RBI Circulars & Press Releases", rbi_blocks),
+        ],
+        period_label,
+        output_key,
+    )
 
 
 def split_response(response: str) -> tuple[str, str]:
@@ -1507,9 +1675,15 @@ def _load_or_scrape_week(
     output_key: str,
     refresh_cache: bool = False,
 ) -> tuple[list[dict], list[dict]]:
-    pib_releases = None if refresh_cache else _load_period_scrape_cache("pib", output_key)
-    rbi_items = None if refresh_cache else _load_period_scrape_cache("rbi", output_key)
-    if refresh_cache:
+    pib_releases = (
+        _load_period_scrape_cache("pib", output_key)
+        if _use_period_cache("pib", output_key, refresh_cache) else None
+    )
+    rbi_items = (
+        _load_period_scrape_cache("rbi", output_key)
+        if _use_period_cache("rbi", output_key, refresh_cache) else None
+    )
+    if refresh_cache and (pib_releases is None or rbi_items is None):
         print("  Refresh requested; ignoring existing weekly scrape cache.")
 
     if pib_releases is None and not refresh_cache:
@@ -1624,7 +1798,48 @@ def _exam_source_scrapers() -> dict:
         # ministry); kept as a distinct key so an exam can opt into broad PIB.
         "pib_all": (scrape_pib_range, "PIB Press Releases (all ministries)"),
         "econsurvey": (scrape_econsurvey_range, "Economic Survey / Yojana"),
+        # News is not scraped here — it's read from the daily news ledger, filtered
+        # to this exam + week (handled specially in _load_or_scrape_week_exam).
+        "news": (None, "Exam-relevant news (this week)"),
     }
+
+
+def _load_exam_news(exam_name: str, start_date: date, end_date: date) -> list[dict]:
+    """This week's exam-tagged news, read from the news dedup ledger (already
+    summarised by the news pipeline — no re-fetch, no LLM). Shaped like a scrape
+    source so it flows through the normal content path: the in-house summary is the
+    detail content."""
+    ledger = BASE_DIR / "data" / "news" / "seen.json"
+    if not ledger.exists():
+        print("  News: no ledger yet (run pipeline/news_runner.py); skipping.")
+        return []
+    try:
+        data = json.loads(ledger.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+
+    items: list[dict] = []
+    for v in (data.values() if isinstance(data, dict) else []):
+        if not isinstance(v, dict):
+            continue
+        summary = (v.get("summary") or "").strip()
+        if not summary or exam_name not in (v.get("exams") or []):
+            continue
+        raw = v.get("date")
+        try:
+            d = datetime.strptime(raw, "%Y-%m-%d").date() if raw else None
+        except ValueError:
+            d = None
+        if d is None or not (start_date <= d <= end_date):
+            continue
+        items.append({
+            "title": v.get("title", ""),
+            "date": raw,
+            "url": v.get("url", ""),
+            "content": summary,
+            "source": v.get("source", "News"),
+        })
+    return items
 
 
 def _generic_block(item: dict, label: str) -> str:
@@ -1649,18 +1864,30 @@ def _load_or_scrape_week_exam(
     refresh_cache: bool,
 ) -> dict[str, list[dict]]:
     reg = _exam_source_scrapers()
-    cache_key = f"{slug}/{output_key}"   # namespace cache per exam
+    # Cache is exam-INDEPENDENT (keyed by canonical source + period), so a source
+    # already scraped for another exam this week is reused, not fetched again.
     result: dict[str, list[dict]] = {}
     to_scrape: dict[str, object] = {}
+
+    from config import EXAMS
 
     for src in sources:
         if src not in reg:
             print(f"  [WARN] Unknown source '{src}' for {slug}; skipping.")
             continue
-        items = None if refresh_cache else _load_period_scrape_cache(src, cache_key)
+        if src == "news":
+            news = _load_exam_news(EXAMS[slug]["name"], start_date, end_date)
+            print(f"  News: {len(news)} exam-relevant item(s) this week (from ledger, no re-fetch).")
+            result[src] = news
+            continue
+        items = (
+            _load_period_scrape_cache(src, output_key)
+            if _use_period_cache(src, output_key, refresh_cache) else None
+        )
         if items is None:
             to_scrape[src] = reg[src][0]
         else:
+            print(f"  Reusing shared {_canonical_source(src)} scrape for {src}.")
             result[src] = items
 
     if to_scrape:
@@ -1674,7 +1901,7 @@ def _load_or_scrape_week_exam(
                 try:
                     items = future.result()
                     if items:
-                        _save_period_scrape_cache(src, cache_key, items)
+                        _save_period_scrape_cache(src, output_key, items)
                 except Exception as e:  # noqa: BLE001
                     print(f"  [ERROR] weekly {src} scraper: {e}")
                     items = []
@@ -1690,16 +1917,18 @@ def _prepare_prompt_content_exam(
     output_key: str,
 ) -> str:
     reg = _exam_source_scrapers()
-    blocks: list[str] = []
+    # Build blocks per canonical source using the SAME formatter every exam uses, so
+    # a shared source (e.g. all-ministry PIB) is condensed once and reused across
+    # exams — only the final summary + questions differ per exam.
+    named: list[tuple[str, str, list[str]]] = []
     usable_total = 0
     for src, items in source_items.items():
+        canon = _canonical_source(src)
         usable = _usable_detail_items(items)
         usable_total += len(usable)
         print(f"  {reg[src][1]}: {len(usable)}/{len(items)} usable detail items")
-        if not usable:
-            continue
-        blocks.append(f"=== {reg[src][1]} ===")
-        blocks.extend(_generic_block(it, src.upper()) for it in usable)
+        blocks = [_format_block_for(canon, it) for it in usable]
+        named.append((canon, reg[src][1], blocks))
 
     if usable_total == 0:
         raise RuntimeError(
@@ -1707,20 +1936,7 @@ def _prepare_prompt_content_exam(
             f"for {period_name}. Nothing to summarise."
         )
 
-    combined = "\n\n".join(blocks)
-    raw_words = len(combined.split())
-    final_budget = _token_budget_words()
-    print(f"  Raw merged content: {raw_words} words (budget: {final_budget})")
-    if raw_words <= final_budget:
-        return combined
-
-    summarized = _summarize_large_content(
-        blocks, period_name, None, None, output_key=f"{exam_cfg['slug']}/{output_key}"
-    )
-    if len(summarized.split()) > final_budget:
-        summarized = _truncate_to_words(summarized, final_budget)
-    print(f"  Condensed content: {len(summarized.split())} words")
-    return summarized
+    return _assemble_exam_content(named, period_name, output_key)
 
 
 def _save_outputs_exam(
@@ -1780,32 +1996,11 @@ def _run_week_exam(
 
     print("\n[Step 3] Building prompt & calling Ollama ...")
     t3 = time.time()
-    # Fold a rotating slice of Economic Survey / Yojana segments into this week's
-    # paper. The rotation ledger guarantees each segment is used by only one week,
-    # so static facts never repeat across weeks (see pipeline/static_sources.py).
-    from pipeline.static_sources import (
-        DEFAULT_WEEKLY_STATIC_QUOTA,
-        format_block,
-        select_for_week,
-    )
-
-    static_segs = select_for_week(
-        cfg["slug"], output_key, start_date, DEFAULT_WEEKLY_STATIC_QUOTA
-    )
-    static_block = format_block(static_segs) if static_segs else None
-    static_quota = len(static_segs)
-    if static_segs:
-        print(
-            f"  Static sources: folding {static_quota} question(s) from "
-            f"{len(static_segs)} Economic Survey/Yojana segment(s) into this week"
-        )
-    prompt = build_prompt(
-        combined,
-        period_name,
-        exam=exam,
-        static_block=static_block,
-        static_quota=static_quota,
-    )
+    # Weekly papers are built from the week's current-affairs material ONLY.
+    # Static sources (Economic Survey — yearly) are intentionally kept separate:
+    # they get their own stored summary + dedicated quiz (see pipeline/
+    # static_runner.py), so weekly questions never mix with foundational ES facts.
+    prompt = build_prompt(combined, period_name, exam=exam)
     response = call_ollama_with_fallback(prompt)
     print(f"  Ollama response: {len(response)} chars  ({time.time()-t3:.1f}s)")
     raw_key = f"{cfg['slug']}-{output_key}"
@@ -1895,8 +2090,11 @@ def run_day(day: int, refresh_cache: bool = False, email_to: str | None = None) 
 
     # Step 2: Validate and merge detail-page content
     print("\n[Step 2] Preparing prompt content ...")
-    _validate_detail_content("pib", pib_releases)
-    _validate_detail_content("rbi", rbi_items)
+    if not pib_releases and not rbi_items:
+        raise RuntimeError(f"No PIB/RBI items found for {month_name} {year}.")
+    _ensure_some_usable_content(
+        [("pib", pib_releases), ("rbi", rbi_items)], f"{month_name} {year}"
+    )
     combined = prepare_prompt_content(pib_releases, rbi_items, month_name, year, month)
 
     # Step 3: Build prompt then call Ollama
@@ -2009,14 +2207,11 @@ def run_week(
             f"No PIB/RBI items found for Week {week} "
             f"({start_date:%Y-%m-%d} to {end_date:%Y-%m-%d})."
         )
-    if pib_releases:
-        _validate_detail_content("pib", pib_releases)
-    else:
-        print("  [WARN] No PIB items found for this week.")
-    if rbi_items:
-        _validate_detail_content("rbi", rbi_items)
-    else:
-        print("  [WARN] No RBI items found for this week.")
+    # Generate from whatever source(s) have content this week — a thin PIB week
+    # still produces a paper from RBI material, and vice versa.
+    _ensure_some_usable_content(
+        [("pib", pib_releases), ("rbi", rbi_items)], f"Week {week}"
+    )
     combined = prepare_prompt_content(
         pib_releases,
         rbi_items,
@@ -2074,6 +2269,65 @@ def run_week(
     print(f"{'='*60}")
 
 
+def run_week_with_retry(
+    week: int,
+    exam: str = DEFAULT_EXAM,
+    refresh_cache: bool = False,
+    email_to: str | None = None,
+    retries: int = 3,
+    base_delay: float = 5.0,
+) -> bool:
+    """Run one exam's week, retrying transient failures a few times.
+
+    Returns True on success, False if it still fails after ``retries`` attempts
+    (so a caller running the whole pipeline can log it and move on).
+    """
+    from config import EXAMS
+
+    name = EXAMS.get(exam, {}).get("name", exam)
+    for attempt in range(1, retries + 1):
+        try:
+            run_week(week, refresh_cache=refresh_cache, email_to=email_to, exam=exam)
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"  [ERROR] {name} Week {week} attempt {attempt}/{retries} failed: {e}")
+            if attempt < retries:
+                delay = base_delay * attempt
+                print(f"  Retrying in {delay:.0f}s ...")
+                time.sleep(delay)
+    print(f"  [FAIL] {name} Week {week}: giving up after {retries} attempts; moving on.")
+    return False
+
+
+def run_week_all_exams(
+    week: int, refresh_cache: bool = False, retries: int = 3
+) -> dict[str, bool]:
+    """Run the weekly pipeline for EVERY active exam, independently.
+
+    Each exam is isolated: a failure (after retries) in one exam does not stop the
+    others. Returns {exam_slug: succeeded}.
+    """
+    from config import active_exams
+
+    results: dict[str, bool] = {}
+    exams = active_exams()
+    print(f"\n{'#' * 60}")
+    print(f"# Weekly pipeline — Week {week} — {len(exams)} active exam(s)")
+    print(f"{'#' * 60}")
+    for slug, cfg in exams.items():
+        print(f"\n----- {cfg['name']} ({slug}) -----")
+        results[slug] = run_week_with_retry(
+            week, exam=slug, refresh_cache=refresh_cache, retries=retries
+        )
+
+    ok = [s for s, v in results.items() if v]
+    bad = [s for s, v in results.items() if not v]
+    print(f"\n=== Week {week} pipeline summary: {len(ok)} succeeded, {len(bad)} failed ===")
+    if bad:
+        print(f"  Failed (skipped this run): {', '.join(bad)}")
+    return results
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Daily pipeline runner for RBI Grade B prep"
@@ -2102,15 +2356,27 @@ if __name__ == "__main__":
         choices=list(EXAMS.keys()),
         help="Which exam to run (weekly mode only). Default: %(default)s",
     )
+    parser.add_argument(
+        "--all-exams",
+        action="store_true",
+        help="Weekly mode: run EVERY active exam for the week, with retry + skip-on-failure",
+    )
     args = parser.parse_args()
     if args.exam != DEFAULT_EXAM and args.week is None:
         parser.error("--exam is only supported with --week (weekly mode).")
+    if args.all_exams and args.week is None:
+        parser.error("--all-exams is only supported with --week (weekly mode).")
     if args.email_existing:
         if args.week is not None:
             email_existing_week_pdfs(args.week, args.email_to)
         else:
             email_existing_pdfs(args.day, args.email_to)
     elif args.week is not None:
+        if args.all_exams:
+            results = run_week_all_exams(args.week, refresh_cache=args.refresh_cache)
+            # Non-zero exit only if EVERY exam failed (lets a scheduler distinguish
+            # "nothing generated" from "some generated").
+            sys.exit(0 if any(results.values()) else 1)
         run_week(
             args.week,
             refresh_cache=args.refresh_cache,

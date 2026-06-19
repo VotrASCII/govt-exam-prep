@@ -102,9 +102,13 @@ ECON_SURVEY_PDF_CANDIDATES = [
     "https://www.indiabudget.gov.in/budget{year}-26/economicsurvey/doc/echapter.pdf",
 ]
 YOJANA_PAGE = "https://www.yojana.gov.in/"
-# Cap on extracted words fed to the LLM per static source (keeps prompts sane).
-STATIC_MAX_WORDS = 16_000
-STATIC_MAX_PAGES_PER_PDF = 220
+# Reference sources (e.g. the Economic Survey) can run 700+ pages. They are NOT
+# truncated to a single prompt — static_runner map-reduces them (chunk → condensed
+# notes → combined summary), so these caps are deliberately generous and mainly
+# bound the worst case. STATIC_MAX_WORDS is the total extracted-text budget;
+# STATIC_MAX_PAGES_PER_PDF covers a full-length Survey.
+STATIC_MAX_WORDS = 220_000
+STATIC_MAX_PAGES_PER_PDF = 900
 
 # How many days back the digest fetches, and the cap per source.
 # The digest stores a rolling week of items; the site then splits them:
@@ -156,8 +160,10 @@ EXAMS = {
         "slug": "upsc-banking",
         "order": 2,
         "active": True,
-        # Broad current affairs: all-ministry PIB plus Economic Survey / Yojana.
-        "sources": ["pib_all", "econsurvey"],
+        # Broad current affairs: all-ministry PIB + RBI circulars (reused from the
+        # shared scrape) + that week's UPSC-tagged news. Economic Survey is a separate
+        # reference section, not a weekly source.
+        "sources": ["pib_all", "rbi", "news", "econsurvey"],
         "taxonomy": "data/patterns/upsc-banking.json",
         "blurb": "Broad general studies current affairs — polity, economy, "
                  "international relations, environment, schemes and science & tech.",
