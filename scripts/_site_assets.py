@@ -362,6 +362,15 @@ ul.facts li strong{color:var(--ink);font-weight:600}
 }
 .quiz-reset:hover{border-color:var(--accent);color:var(--accent)}
 
+.quiz-section{
+  position:sticky;top:3.4rem;z-index:5;
+  margin:2.2rem 0 .2rem;padding:.7rem 0;
+  background:color-mix(in srgb,var(--bg) 92%,transparent);
+  backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
+  font-family:'Instrument Serif',serif;font-weight:400;font-size:1.5rem;
+  line-height:1.1;color:var(--ink);
+}
+.quiz-section:first-child{margin-top:.4rem}
 .q{padding:1.8rem 0;border-bottom:1px solid var(--line-soft)}
 .q-stem{display:flex;gap:.9rem;margin-bottom:1rem}
 .q-no{
@@ -597,7 +606,16 @@ JS = r"""(() => {
   function render() {
     answered = 0; correct = 0;
     wrap.innerHTML = '';
+    let curSection = null;
     questions.forEach((q, i) => {
+      // Group questions under their source section (e.g. Economic Survey chapters).
+      if (q.section && q.section !== curSection) {
+        curSection = q.section;
+        const h = document.createElement('h3');
+        h.className = 'quiz-section';
+        h.textContent = q.section;
+        wrap.appendChild(h);
+      }
       const card = document.createElement('div');
       card.className = 'q';
       const stem = document.createElement('div');
