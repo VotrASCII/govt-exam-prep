@@ -287,6 +287,7 @@ def parse_summary(markdown: str) -> tuple[list[Section], str | None]:
     sections: list[Section] = []
     current: Section | None = None
     note: str | None = None
+    pending_sub: str | None = None  # buffered ### heading, emitted only if content follows
 
     def ensure_section() -> Section:
         nonlocal current
@@ -294,6 +295,12 @@ def parse_summary(markdown: str) -> tuple[list[Section], str | None]:
             current = Section(title="Highlights")
             sections.append(current)
         return current
+
+    def flush_sub() -> None:
+        nonlocal pending_sub
+        if pending_sub and current is not None:
+            current.blocks.append(pending_sub)
+        pending_sub = None
 
     lines = markdown.splitlines()
     i = 0
@@ -308,6 +315,7 @@ def parse_summary(markdown: str) -> tuple[list[Section], str | None]:
             while i < len(lines) and lines[i].strip().startswith("|"):
                 table_rows.append(lines[i].strip())
                 i += 1
+            flush_sub()
             ensure_section().blocks.append(_render_table(table_rows))
             continue
         i += 1
@@ -321,21 +329,24 @@ def parse_summary(markdown: str) -> tuple[list[Section], str | None]:
         if re.match(r"^\*?\*?PART\s*1", line, re.IGNORECASE):
             continue
         if line.startswith("## "):
+            pending_sub = None  # discard sub-heading that had no content
             current = Section(title=line[3:].strip())
             sections.append(current)
             continue
         if line.startswith("### "):
-            if current is not None:
-                current.blocks.append(f'<h3 class="sub">{_inline(line[4:].strip())}</h3>')
+            # Buffer — only emitted when actual content follows (prevents blank headings).
+            pending_sub = f'<h3 class="sub">{_inline(line[4:].strip())}</h3>' if current is not None else None
             continue
         # Trailing provenance note rendered in italics, e.g. _All bullet points…_
         if line.startswith("_") and line.endswith("_") and len(line) > 2:
             note = _inline(line[1:-1].strip())
             continue
         if line.startswith("- ") or line.startswith("* "):
+            flush_sub()
             ensure_section().blocks.append(f"<li>{_inline(line[2:].strip())}</li>")
             continue
         # Fallback: stray paragraph text.
+        flush_sub()
         ensure_section().blocks.append(f"<p>{_inline(line)}</p>")
 
     # Drop empty sections (heading with no content).

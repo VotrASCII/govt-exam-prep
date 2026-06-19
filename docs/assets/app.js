@@ -77,16 +77,43 @@
   function render() {
     answered = 0; correct = 0;
     wrap.innerHTML = '';
+
+    // Pre-count questions per section for the badge.
+    const sectionCounts = {};
+    questions.forEach((q) => {
+      if (q.section) sectionCounts[q.section] = (sectionCounts[q.section] || 0) + 1;
+    });
+
     let curSection = null;
+    let sectionContainer = wrap;
+    let firstSection = true;
+
     questions.forEach((q, i) => {
-      // Group questions under their source section (e.g. Economic Survey chapters).
-      if (q.section && q.section !== curSection) {
+      // Collapsible section block when a new section is encountered.
+      if (q.section !== curSection) {
         curSection = q.section;
-        const h = document.createElement('h3');
-        h.className = 'quiz-section';
-        h.textContent = q.section;
-        wrap.appendChild(h);
+        if (q.section) {
+          const details = document.createElement('details');
+          details.className = 'quiz-section-block';
+          if (firstSection) { details.open = true; firstSection = false; }
+          const sum = document.createElement('summary');
+          sum.className = 'quiz-section';
+          sum.appendChild(document.createTextNode(q.section + ' '));
+          const badge = document.createElement('span');
+          badge.className = 'qs-count';
+          badge.textContent = sectionCounts[q.section];
+          sum.appendChild(badge);
+          details.appendChild(sum);
+          const body = document.createElement('div');
+          body.className = 'quiz-section-body';
+          details.appendChild(body);
+          wrap.appendChild(details);
+          sectionContainer = body;
+        } else {
+          sectionContainer = wrap;
+        }
       }
+
       const card = document.createElement('div');
       card.className = 'q';
       const stem = document.createElement('div');
@@ -116,7 +143,7 @@
       const verdict = document.createElement('div');
       verdict.className = 'q-verdict';
       card.appendChild(verdict);
-      wrap.appendChild(card);
+      sectionContainer.appendChild(card);
     });
     updateBar();
   }

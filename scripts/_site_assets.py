@@ -362,15 +362,25 @@ ul.facts li strong{color:var(--ink);font-weight:600}
 }
 .quiz-reset:hover{border-color:var(--accent);color:var(--accent)}
 
+.quiz-section-block{border-bottom:1px solid var(--line)}
 .quiz-section{
-  position:sticky;top:3.4rem;z-index:5;
-  margin:2.2rem 0 .2rem;padding:.7rem 0;
-  background:color-mix(in srgb,var(--bg) 92%,transparent);
-  backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
+  list-style:none;cursor:pointer;
+  display:flex;align-items:center;gap:.7rem;
+  padding:1.1rem 0;
   font-family:'Instrument Serif',serif;font-weight:400;font-size:1.5rem;
-  line-height:1.1;color:var(--ink);
+  line-height:1.1;color:var(--ink);user-select:none;
 }
-.quiz-section:first-child{margin-top:.4rem}
+.quiz-section::-webkit-details-marker{display:none}
+.quiz-section::before{
+  content:"+";color:var(--accent);font-size:1.1rem;
+  font-family:'JetBrains Mono',monospace;flex-shrink:0;
+}
+.quiz-section-block[open]>.quiz-section::before{content:"–"}
+.qs-count{
+  font-family:'JetBrains Mono',monospace;font-size:.66rem;color:var(--muted);
+  border:1px solid var(--line);border-radius:2px;padding:.12rem .4rem;
+}
+.quiz-section-body{padding-bottom:.5rem}
 .q{padding:1.8rem 0;border-bottom:1px solid var(--line-soft)}
 .q-stem{display:flex;gap:.9rem;margin-bottom:1rem}
 .q-no{
@@ -606,16 +616,43 @@ JS = r"""(() => {
   function render() {
     answered = 0; correct = 0;
     wrap.innerHTML = '';
+
+    // Pre-count questions per section for the badge.
+    const sectionCounts = {};
+    questions.forEach((q) => {
+      if (q.section) sectionCounts[q.section] = (sectionCounts[q.section] || 0) + 1;
+    });
+
     let curSection = null;
+    let sectionContainer = wrap;
+    let firstSection = true;
+
     questions.forEach((q, i) => {
-      // Group questions under their source section (e.g. Economic Survey chapters).
-      if (q.section && q.section !== curSection) {
+      // Collapsible section block when a new section is encountered.
+      if (q.section !== curSection) {
         curSection = q.section;
-        const h = document.createElement('h3');
-        h.className = 'quiz-section';
-        h.textContent = q.section;
-        wrap.appendChild(h);
+        if (q.section) {
+          const details = document.createElement('details');
+          details.className = 'quiz-section-block';
+          if (firstSection) { details.open = true; firstSection = false; }
+          const sum = document.createElement('summary');
+          sum.className = 'quiz-section';
+          sum.appendChild(document.createTextNode(q.section + ' '));
+          const badge = document.createElement('span');
+          badge.className = 'qs-count';
+          badge.textContent = sectionCounts[q.section];
+          sum.appendChild(badge);
+          details.appendChild(sum);
+          const body = document.createElement('div');
+          body.className = 'quiz-section-body';
+          details.appendChild(body);
+          wrap.appendChild(details);
+          sectionContainer = body;
+        } else {
+          sectionContainer = wrap;
+        }
       }
+
       const card = document.createElement('div');
       card.className = 'q';
       const stem = document.createElement('div');
@@ -645,7 +682,7 @@ JS = r"""(() => {
       const verdict = document.createElement('div');
       verdict.className = 'q-verdict';
       card.appendChild(verdict);
-      wrap.appendChild(card);
+      sectionContainer.appendChild(card);
     });
     updateBar();
   }
