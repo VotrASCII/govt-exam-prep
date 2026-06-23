@@ -49,9 +49,7 @@ RBI_PRESS_URL = (
 
 # ── News pipeline (RSS-based) ──────────────────────────────────────────────
 # Only RSS metadata (headline, link, date, short summary) is ingested — never
-# full copyrighted article bodies. Business Standard blocks direct RSS access
-# (Akamai 403), so it is ingested via a Google-News site-restricted feed, which
-# returns BS headlines that link back to the original Business Standard article.
+# full copyrighted article bodies.
 NEWS_FEEDS = {
     "Economic Times": [
         "https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms",
@@ -65,9 +63,6 @@ NEWS_FEEDS = {
     ],
     "Hindustan Times": [
         "https://www.hindustantimes.com/feeds/rss/business/rssfeed.xml",
-    ],
-    "Business Standard": [
-        "https://news.google.com/rss/search?q=site:business-standard.com+when:7d&hl=en-IN&gl=IN&ceid=IN:en",
     ],
 }
 
