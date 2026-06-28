@@ -1405,7 +1405,7 @@ def prepare_prompt_content(
 
 def split_response(response: str) -> tuple[str, str]:
     """Split Ollama response into (summary, questions) at PART 2."""
-    marker_re = re.compile(r"PART\s*2", re.IGNORECASE)
+    marker_re = re.compile(r"#{0,6}\s*PART\s*2", re.IGNORECASE)
     m = marker_re.search(response)
     if m:
         summary = response[: m.start()].strip()
