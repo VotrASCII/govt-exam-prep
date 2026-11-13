@@ -5,7 +5,7 @@
 # cron runs with a minimal environment (no conda activation, sparse PATH, no
 # SSH agent), so this script makes the run reproducible:
 #   - pins the conda python that has the project's deps
-#   - puts ollama / git / ssh on PATH
+#   - puts claude / git / ssh on PATH
 #   - cd's into the repo so all the BASE_DIR-relative paths resolve
 #   - serialises runs with a lock so a slow weekly run can't overlap a daily one
 #   - appends timestamped output to data/logs/ (gitignored)
@@ -21,8 +21,8 @@ MODE="${1:-news}"
 REPO="/Users/votrascii/Govt Exams/govt_exam_prep"
 PYTHON="/Users/votrascii/anaconda3/envs/agenticai/bin/python"
 
-# ollama lives in /usr/local/bin; git/ssh in /usr/bin. Keep the default PATH too.
-export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+# claude lives in ~/.local/bin; git/ssh in /usr/bin. Keep the default PATH too.
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 cd "$REPO"
 

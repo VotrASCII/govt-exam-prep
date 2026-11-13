@@ -6,7 +6,7 @@ relevance to RBI Grade B, SEBI Grade A, NABARD Grade A and UPSC/Banking, writes
 a one-line "why it matters" note, and saves a cited digest to data/news/.
 
 Exam tagging + the relevance note use a fast keyword heuristic as a baseline,
-refined by Ollama when it is reachable. Only RSS metadata is stored — never the
+refined by Claude when available. Only RSS metadata is stored — never the
 full copyrighted article body. Every item links back to its source.
 
 Usage:
@@ -73,15 +73,9 @@ def heuristic_topic(item: dict) -> str:
 # LLM refinement (optional)
 # ---------------------------------------------------------------------------
 
-def _ollama_available() -> bool:
-    try:
-        import requests
-        from config import OLLAMA_URL
-        base = OLLAMA_URL.rsplit("/api/", 1)[0]
-        r = requests.get(f"{base}/api/tags", timeout=4)
-        return r.status_code == 200
-    except Exception:
-        return False
+def _llm_available() -> bool:
+    from pipeline.llm import llm_available
+    return llm_available()
 
 def _build_batch_prompt(batch: list[dict]) -> str:
     lines = []
@@ -125,15 +119,15 @@ def _parse_llm_json(raw: str) -> list[dict]:
     return data if isinstance(data, list) else []
 
 def llm_refine(items: list[dict], batch_size: int = 12) -> None:
-    """Annotate items in place with exams/relevance/topic via Ollama."""
-    from pipeline.daily_runner import call_ollama_with_fallback
+    """Annotate items in place with exams/relevance/topic via Claude."""
+    from pipeline.llm import call_llm
 
     for start in range(0, len(items), batch_size):
         batch = items[start : start + batch_size]
         prompt = _build_batch_prompt(batch)
         print(f"  LLM tagging items {start + 1}-{start + len(batch)} of {len(items)} ...")
         try:
-            raw = call_ollama_with_fallback(prompt)
+            raw = call_llm(prompt)
         except Exception as e:
             print(f"  [WARN] LLM batch failed, keeping heuristics: {e}")
             continue
@@ -243,8 +237,8 @@ def run(use_llm: bool = True, lookback_days: int | None = None) -> Path:
             new_items.append(it)
     print(f"  {reused} already summarised (reused), {len(new_items)} new this run")
 
-    if new_items and use_llm and _ollama_available():
-        print(f"\n[Step 3] Refining {len(new_items)} NEW item(s) with Ollama ...")
+    if new_items and use_llm and _llm_available():
+        print(f"\n[Step 3] Refining {len(new_items)} NEW item(s) with Claude ...")
         llm_refine(new_items)
     elif not new_items:
         print("\n[Step 3] No new items — nothing to summarise, skipping LLM.")

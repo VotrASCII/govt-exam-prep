@@ -5,13 +5,15 @@ Guidance for working in this repo. Keep it accurate and terse — it loads every
 ## What this is
 
 Multi-exam **General Awareness** study tool for Indian government exams. It scrapes
-official sources, uses an LLM (Ollama) to produce **weekly summaries + practice MCQs**
+official sources, uses an LLM (Claude via the `claude` CLI) to produce **weekly summaries + practice MCQs**
 per exam, and publishes a **pure-stdlib static site** to GitHub Pages. Live exams: RBI
 Grade B (default), UPSC / Banking. Scaffolded: SEBI Grade A, NABARD Grade A.
 
 No web framework, no database. Python standard library + a few scrapers. The LLM is
-**Ollama** (`gpt-oss:20b-cloud` primary, small `qwen3.5` fallbacks). Cloud models run
-on-demand even if absent from `ollama list`.
+**Claude Sonnet at high effort**, called through `pipeline/llm.py` → `claude -p` subprocess
+(uses the logged-in Claude Code account; no API key; tools disabled; neutral cwd). Ollama was
+removed because it started costing money. Settings: `CLAUDE_*` in `config.py`
+(env overrides `PIPELINE_LLM_MODEL` / `PIPELINE_LLM_EFFORT`; not `CLAUDE_*`, which Claude Code itself sets).
 
 ## Architecture (data-driven by `config.py`)
 
@@ -24,7 +26,7 @@ Each exam's taxonomy lives in `data/patterns/<exam>.json` with a `prompt_profile
 derived empirically from PYQs via `scripts/derive_weightage.py`.
 
 ### Key files
-- `config.py` — `EXAMS`/`DEFAULT_EXAM`, Ollama/news/static settings, week+cycle helpers,
+- `config.py` — `EXAMS`/`DEFAULT_EXAM`, Claude/news/static settings, week+cycle helpers,
   chunk/word budgets.
 - `pipeline/daily_runner.py` — weekly/monthly generation. **Two paths:** the original RBI
   default (PIB+RBI) and the additive generic multi-exam path. Scrape caching, map-reduce
@@ -44,7 +46,7 @@ derived empirically from PYQs via `scripts/derive_weightage.py`.
    (exam-independent — see Optimizations).
 2. **Assemble content** per exam: build blocks per source; large sources are **map-reduced**
    into condensed notes cached at `data/chunk_notes/<period>/src-<source>.json` (shared).
-3. **Generate**: `build_prompt` (taxonomy-driven) → Ollama → split into summary + MCQs.
+3. **Generate**: `build_prompt` (taxonomy-driven) → `call_llm` (Claude) → split into summary + MCQs.
 4. **Save**: `data/summaries/<exam>/<key>.md` + `data/questions/generated/<exam>/<key>-qs.json`.
    The default exam (`rbi-grade-b`) keeps the original **flat** layout; others are namespaced.
 5. **Build** `scripts/build_site.py` → `docs/` (`index.html`, `exams/<slug>.html`,
@@ -73,7 +75,7 @@ collapsible "In this week".
 - `main` is branch-protected (CODEOWNERS; owner-only approver). Commit messages end with
   `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 - Email code is kept but **not triggered by the pipeline** (manual `--email-to` only).
-- `.claudeignore` controls only what Claude loads; Ollama/the pipeline read `data/` from
+- `.claudeignore` controls only what Claude loads; the pipeline reads `data/` from
   disk regardless. Don't "fix" the pipeline by un-ignoring data.
 
 ## Resource optimization — minimize, never at the cost of quality
@@ -108,7 +110,9 @@ Worth considering later (don't block on these):
 - A full weekly run is genuinely heavy (~30 min/exam): PIB can be ~190k words → ~15 map-reduce
   chunks. The 740-page Economic Survey is slow to extract (pdfplumber) and map-reduce. This is
   expected; don't truncate to "speed it up" — that's what regressed the ES summary before.
-- `gpt-oss:20b-cloud` is the primary even though it's a cloud model not shown by `ollama list`.
+- Each LLM call spends Claude usage (Sonnet, high). `LLM_CONTEXT_TOKENS` still sizes map-reduce
+  chunks at the old 64k value so existing `data/chunk_notes` caches keep hitting — don't change it
+  casually (it re-condenses everything).
 
 ## Common commands
 ```bash

@@ -13,7 +13,7 @@ and NABARD Grade A scaffolded.
 2. **Scrapes each exam's own sources** — PIB press releases and RBI circulars for RBI
    Grade B; broad all-ministry PIB and the Economic Survey for UPSC / Banking — with
    local caching
-3. **Generates AI summaries + practice MCQs** for weekly or monthly periods using Ollama,
+3. **Generates AI summaries + practice MCQs** for weekly or monthly periods using Claude (Sonnet, high effort),
    with the topic and question-type mix tuned per exam (see *Multi-exam architecture*)
 4. **Schedules itself** — every **Monday 00:00** it ingests the just-completed week
    (Mon–Sun) for **all active exams**, then pushes so GitHub Pages redeploys; the news
@@ -118,21 +118,13 @@ no other account can push; any future collaborator must open a PR the owner appr
 
 ## Setup
 
-### 1. Install Ollama and pull the models
+### 1. Install Claude Code and log in
 
-The pipeline calls a strong primary model and falls back to small local models if it
-is unavailable (see `OLLAMA_MODELS` in `config.py`). Defaults:
-
-```bash
-# Install from https://ollama.com
-ollama pull gpt-oss:20b-cloud   # primary (Ollama Cloud) — summaries + MCQs
-ollama pull qwen3.5:2b           # local fallback
-ollama pull qwen3.5:0.8b         # last-resort fallback
-```
-
-Cloud models (`*-cloud`) run via Ollama's hosted tier and don't need to appear in
-`ollama list` to work. Swap in any installed model by editing `OLLAMA_MODELS` or
-setting the `OLLAMA_MODELS` env var (see *Configuration*).
+All summaries, MCQs, map-reduce condensation and news tagging go through `pipeline/llm.py`,
+which runs `claude -p` (Sonnet, `--effort high`, no tools) as a subprocess using your
+logged-in Claude Code account — no API key needed. Install Claude Code, run `claude`
+once to log in, and you're set. (If `ANTHROPIC_API_KEY` is set in your environment the
+CLI bills that key instead of your subscription.)
 
 ### 2. Install Python dependencies
 
@@ -276,13 +268,13 @@ other exam is namespaced under its `<exam-slug>`.
 | **Caches & state** | |
 | `data/scraped/<period>/…` , `data/scraped/<exam-slug>/<key>/…` | Cached source scrapes |
 | `data/chunk_notes/<period-key>/chunk-NNN.json` | Cached condensed notes for oversized periods |
-| `data/llm_raw/<key>-*.md` | Raw Ollama responses (for debugging/recovery) |
+| `data/llm_raw/<key>-*.md` | Raw LLM responses (for debugging/recovery) |
 | `data/raw/edutap_ga.pdf` | Downloaded EduTap GA PDF |
 | `data/news/latest.json`, `data/news/YYYY-MM-DD.json` | News digest + dated snapshots |
 | `data/news/seen.json` | Dedup ledger — items already summarised, so daily runs only LLM new ones |
 | `data/state.json` | Scheduler state (current pipeline week) |
 
-The daily runner checks the relevant `data/scraped/` cache before scraping. If cached source data exists, it skips that scraper and goes straight to prompt building and Ollama. To force a fresh scrape:
+The daily runner checks the relevant `data/scraped/` cache before scraping. If cached source data exists, it skips that scraper and goes straight to prompt building and the LLM. To force a fresh scrape:
 
 ```bash
 python pipeline/daily_runner.py --week 1 --refresh-cache
@@ -320,7 +312,7 @@ python pipeline/daily_runner.py --week 1
 python pipeline/daily_runner.py --week 1 --email-to "one@example.com,two@example.com"
 ```
 
-To email already-generated PDFs without rerunning scraping or Ollama:
+To email already-generated PDFs without rerunning scraping or the LLM:
 
 ```bash
 python pipeline/daily_runner.py --week 1 --email-existing
@@ -339,9 +331,9 @@ relevance tags.
   article.
 - **What is stored:** only RSS metadata — headline, source, date, and a short blurb.
   Full copyrighted article bodies are **never** scraped or republished.
-- **Self-contained summaries:** Ollama rewrites each item into an original 2–3
+- **Self-contained summaries:** Claude rewrites each item into an original 2–3
   sentence, exam-focused summary shown inline on the site (no outbound links) and
-  credited to the originating outlet. Without Ollama, the RSS blurb is used as-is.
+  credited to the originating outlet. Without the LLM, the RSS blurb is used as-is.
 - **Headline window + weekly fold:** the digest fetches a rolling week
   (`NEWS_LOOKBACK_DAYS = 7`), but the site shows only the last
   `NEWS_HEADLINE_DAYS + 1` days (today + yesterday) in the main list; the rest of the
@@ -350,7 +342,7 @@ relevance tags.
   lost. Widen the fetch with `--days` for a one-off catch-up.
 - **Exam tagging:** each item is screened for relevance to **RBI Grade B, SEBI
   Grade A, NABARD Grade A, and UPSC / Banking**. A keyword heuristic provides the
-  baseline; Ollama refines the tags and topic when reachable.
+  baseline; Claude refines the tags and topic when reachable.
 - **Runs daily, no wasted effort:** the news refresh fires every day at 00:00, but a
   dedup ledger (`data/news/seen.json`, keyed by URL) remembers items already
   summarised, so each run spends the LLM **only on genuinely new articles** — the same
@@ -360,7 +352,7 @@ Run it:
 
 ```bash
 python pipeline/news_runner.py            # fetch, tag (LLM if available), save
-python pipeline/news_runner.py --no-llm   # heuristic tagging only (fast, no Ollama)
+python pipeline/news_runner.py --no-llm   # heuristic tagging only (fast, no LLM)
 python pipeline/news_runner.py --days 14  # widen the lookback window
 ```
 
@@ -457,8 +449,8 @@ was a one-time setup; you only need to redo it if you recreate the repo:
 ## Configuration
 
 Edit `config.py` to change:
-- Ollama URL / model names (`OLLAMA_MODEL_PRIMARY`, `OLLAMA_MODEL_FALLBACK`) and the
-  `OLLAMA_MODELS` fallback order, context window, and read timeout
+- LLM settings (`CLAUDE_MODEL`, `CLAUDE_EFFORT`, `CLAUDE_TIMEOUT_SECONDS`,
+  `CLAUDE_MAX_ATTEMPTS`) and the chunk-sizing budget `LLM_CONTEXT_TOKENS`
 - Large-period chunking via `CHUNK_CONTENT_WORDS` and `CHUNK_SUMMARY_WORDS`
 - Source-material budget via `MAX_CONTENT_WORDS` (raised to **90,000** so far more
   source text reaches the model before any truncation → richer, fuller summaries)
@@ -471,8 +463,8 @@ Edit `config.py` to change:
   `STATIC_MAX_PAGES_PER_PDF`, and the source URLs (`ECON_SURVEY_*`)
 - Fuzzy dedup threshold (`FUZZY_THRESHOLD`)
 
-You can also override the model order without editing files:
+You can also override the model / effort without editing files:
 
 ```bash
-OLLAMA_MODELS="gpt-oss:20b-cloud,qwen3.5:2b" python pipeline/daily_runner.py --week 28
+PIPELINE_LLM_MODEL=opus PIPELINE_LLM_EFFORT=high python pipeline/daily_runner.py --week 28
 ```

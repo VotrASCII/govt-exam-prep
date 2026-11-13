@@ -31,9 +31,9 @@ from pipeline.daily_runner import (  # noqa: E402
     _detail_content_status,
     _period_key,
     _save_outputs,
-    _save_raw_ollama_response,
+    _save_raw_llm_response,
     _usable_detail_items,
-    call_ollama_with_fallback,
+    call_llm,
     clean_summary_markdown,
     get_week_period,
     parse_questions,
@@ -229,8 +229,8 @@ def _complete_some_questions(
         start_number,
         target_questions,
     )
-    continuation = call_ollama_with_fallback(prompt)
-    path = _save_raw_ollama_response(
+    continuation = call_llm(prompt)
+    path = _save_raw_llm_response(
         None,
         None,
         continuation,
@@ -296,8 +296,8 @@ def backfill_week(
     )
     prompt = _build_available_prompt(combined, period_name, question_count, source_note)
 
-    response = call_ollama_with_fallback(prompt)
-    raw_path = _save_raw_ollama_response(
+    response = call_llm(prompt)
+    raw_path = _save_raw_llm_response(
         None,
         None,
         response,
@@ -370,7 +370,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print selected weeks and usable-content counts without calling Ollama.",
+        help="Print selected weeks and usable-content counts without calling Claude.",
     )
     return parser.parse_args()
 

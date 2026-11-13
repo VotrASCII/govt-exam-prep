@@ -95,7 +95,7 @@ def _condense_large_source(exam: str, kind: str, key: str, source_text: str, top
     summarised into exam-focused notes and the notes are concatenated. The caller
     then feeds the combined notes to the section-wise summary prompt.
     """
-    from pipeline.daily_runner import call_ollama_with_fallback, clean_summary_markdown
+    from pipeline.daily_runner import call_llm, clean_summary_markdown
 
     cache_dir = static_dir(exam) / "chunk_notes" / f"{kind}-{key}"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -119,7 +119,7 @@ def _condense_large_source(exam: str, kind: str, key: str, source_text: str, top
                 pass
         print(f"    [{index}/{len(chunks)}] condensing ({len(chunk.split())} words) ...")
         prompt = _condense_chunk_prompt(exam, kind, key, chunk, index, len(chunks), topics)
-        note = clean_summary_markdown(call_ollama_with_fallback(prompt))
+        note = clean_summary_markdown(call_llm(prompt))
         cpath.write_text(json.dumps({"hash": chash, "notes": note}, ensure_ascii=False), encoding="utf-8")
         notes.append(note)
 
@@ -252,7 +252,7 @@ NOTES (condensed from the full Economic Survey {key}):
 """
 
 
-def _section_wise_summary(exam: str, key: str, notes: str, call_ollama) -> list[tuple[str, str]]:
+def _section_wise_summary(exam: str, key: str, notes: str, call_llm) -> list[tuple[str, str]]:
     """Summarise the Economic Survey one section at a time (independent passes).
     Returns [(section_title, body_markdown), ...] — each section gets its own depth
     instead of collapsing 700+ pages into a single over-compressed summary."""
@@ -262,7 +262,7 @@ def _section_wise_summary(exam: str, key: str, notes: str, call_ollama) -> list[
     total = len(ECON_SURVEY_SECTIONS)
     for i, section in enumerate(ECON_SURVEY_SECTIONS, 1):
         print(f"    [summary {i}/{total}] {section} ...")
-        body = clean_summary_markdown(call_ollama(_section_summary_prompt(exam, key, section, notes))).strip()
+        body = clean_summary_markdown(call_llm(_section_summary_prompt(exam, key, section, notes))).strip()
         if body:
             pairs.append((section, body))
     return pairs
@@ -341,13 +341,13 @@ SECTION SUMMARY — {section} (Economic Survey {key}):
 def weekly_reference_questions(exam: str, n: int) -> list[dict]:
     """Generate up to ``n`` fresh Economic Survey MCQs from random sections, distinct
     from the stored ES quiz, to fold into a weekly paper. Returns [] if the exam has no
-    Economic Survey reference source or n<=0. Needs Ollama."""
+    Economic Survey reference source or n<=0. Needs the claude CLI."""
     if n <= 0:
         return []
     import random
 
     from pipeline.static_sources import list_sources
-    from pipeline.daily_runner import call_ollama_with_fallback, parse_questions
+    from pipeline.daily_runner import call_llm, parse_questions
 
     srcs = [s for s in list_sources(exam)
             if s.get("kind") == "economic-survey" and s.get("summary_md", "").strip()]
@@ -369,7 +369,7 @@ def weekly_reference_questions(exam: str, n: int) -> list[dict]:
     for title in titles:
         if len(out) >= n:
             break
-        qs = parse_questions(call_ollama_with_fallback(
+        qs = parse_questions(call_llm(
             _weekly_es_prompt(exam, key, title, sections[title], used_by_section.get(title, []))
         ))
         if qs:
@@ -403,7 +403,7 @@ def run(
         )
     print(f"  Source text: {len(source_text.split())} words")
 
-    from pipeline.daily_runner import call_ollama_with_fallback, parse_questions
+    from pipeline.daily_runner import call_llm, parse_questions
 
     topics = _load_taxonomy_topics(exam)
 
@@ -420,7 +420,7 @@ def run(
         # Independent per-section summaries (depth per chapter, not consolidated),
         # then a dedicated quiz of n_questions MCQs PER SECTION.
         print(f"  [1/2] Summarising {len(ECON_SURVEY_SECTIONS)} sections independently ...")
-        pairs = _section_wise_summary(exam, key, summary_basis, call_ollama_with_fallback)
+        pairs = _section_wise_summary(exam, key, summary_basis, call_llm)
         summary_md = "\n\n".join(f"## {sec}\n{body}" for sec, body in pairs)
         save_source(exam, kind, key, summary_md, [])
         print(f"  Saved section-wise summary ({len(summary_md.split())} words, {len(pairs)} sections).")
@@ -431,15 +431,15 @@ def run(
         for i, (section, body) in enumerate(pairs, 1):
             print(f"    [quiz {i}/{len(pairs)}] {section} ...")
             qs = parse_questions(
-                call_ollama_with_fallback(_section_quiz_prompt(exam, key, section, body, n_questions))
+                call_llm(_section_quiz_prompt(exam, key, section, body, n_questions))
             )
             for q in qs:
                 q["section"] = section  # tag for grouping/clarity on the site
             questions.extend(qs)
     else:
         prompt = _build_prompt(exam, kind, key, topics, summary_basis)
-        print("  [1/2] Generating section-wise summary + segments via Ollama ...")
-        summary_md, segments = _parse_output(call_ollama_with_fallback(prompt))
+        print("  [1/2] Generating section-wise summary + segments via Claude ...")
+        summary_md, segments = _parse_output(call_llm(prompt))
         save_source(exam, kind, key, summary_md, segments)
         print(f"  Saved summary ({len(summary_md.split())} words, {len(segments)} segments).")
         print(f"  [2/2] Curating {n_questions} dedicated MCQs from the summary ...")

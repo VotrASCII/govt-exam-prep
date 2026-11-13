@@ -1,6 +1,6 @@
 name: Deploy site to GitHub Pages
 
-# The site in docs/ is built locally (it needs the private data/ + Ollama) and
+# The site in docs/ is built locally (it needs the private data/ + the claude CLI) and
 # committed. This workflow just publishes the committed docs/ folder to Pages.
 on:
   push:

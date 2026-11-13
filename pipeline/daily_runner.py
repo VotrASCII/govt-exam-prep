@@ -1,6 +1,6 @@
 """
 Module 4 — Daily Pipeline Runner
-Processes monthly or weekly PIB + RBI data, generates a GA summary and MCQs via Ollama.
+Processes monthly or weekly PIB + RBI data, generates a GA summary and MCQs via Claude.
 Usage: python pipeline/daily_runner.py --day N OR python pipeline/daily_runner.py --week N
 """
 
@@ -32,18 +32,11 @@ from config import (
     MAX_CONTENT_WORDS,
     MIN_DETAIL_CONTENT_COVERAGE,
     MIN_DETAIL_CONTENT_WORDS,
-    OLLAMA_CONNECT_TIMEOUT_SECONDS,
-    OLLAMA_DISABLE_THINKING,
-    OLLAMA_MODEL_FALLBACK,
-    OLLAMA_MODEL_PRIMARY,
-    OLLAMA_MODELS,
-    OLLAMA_NUM_CTX,
-    OLLAMA_NUM_PREDICT,
-    OLLAMA_READ_TIMEOUT_SECONDS,
-    OLLAMA_URL,
+    LLM_CONTEXT_TOKENS,
     WEEK_RANGE_END,
     WEEK_RANGE_START,
 )
+from pipeline.llm import call_llm
 from pipeline.prompt_builder import build_prompt   # imported but called inside run_day()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -209,9 +202,9 @@ def _truncate_to_words(text: str, max_words: int) -> str:
 
 
 def _token_budget_words() -> int:
-    # A conservative char/token approximation keeps prompts inside Ollama's
-    # context window while leaving room for instructions and generation state.
-    context_limited_words = int((OLLAMA_NUM_CTX or 32768) * 0.62)
+    # A conservative char/token approximation keeps prompts inside the
+    # chunk-sizing budget while leaving room for instructions and generation state.
+    context_limited_words = int((LLM_CONTEXT_TOKENS or 32768) * 0.62)
     return min(MAX_CONTENT_WORDS, context_limited_words)
 
 
@@ -551,7 +544,7 @@ def clean_summary_markdown(markdown: str) -> str:
     return cleaned.strip()
 
 
-def _save_raw_ollama_response(
+def _save_raw_llm_response(
     year: int | str | None,
     month: int | None,
     response: str,
@@ -990,113 +983,6 @@ def email_existing_week_pdfs(week: int, raw_recipients: str) -> None:
     print(f"  Existing weekly summary and questions PDFs emailed → {', '.join(recipients)}")
 
 
-def _configured_ollama_models() -> list[str]:
-    env_models = os.getenv("OLLAMA_MODELS", "")
-    if env_models.strip():
-        candidates = [model.strip() for model in env_models.split(",")]
-    else:
-        candidates = list(OLLAMA_MODELS or [OLLAMA_MODEL_PRIMARY, OLLAMA_MODEL_FALLBACK])
-
-    models = []
-    for model in candidates:
-        if model and model not in models:
-            models.append(model)
-    return models
-
-
-def _ollama_options(num_predict: int | None = None) -> dict:
-    options = {}
-    if OLLAMA_NUM_CTX:
-        options["num_ctx"] = OLLAMA_NUM_CTX
-    predict_budget = num_predict or OLLAMA_NUM_PREDICT
-    if predict_budget:
-        options["num_predict"] = predict_budget
-    return options
-
-
-def _call_ollama(prompt: str, model: str, num_predict: int | None = None) -> str | None:
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": True,
-        "think": not OLLAMA_DISABLE_THINKING,
-        "system": (
-            "You are an expert assistant helping a student prepare for the "
-            "RBI Grade B Phase 1 General Awareness exam. Be concise and exam-focused."
-        ),
-    }
-    options = _ollama_options(num_predict)
-    if options:
-        payload["options"] = options
-
-    try:
-        chunks = []
-        thinking_chunks = 0
-        done_reason = ""
-        with requests.post(
-            OLLAMA_URL,
-            json=payload,
-            stream=True,
-            timeout=(OLLAMA_CONNECT_TIMEOUT_SECONDS, OLLAMA_READ_TIMEOUT_SECONDS),
-        ) as r:
-            try:
-                r.raise_for_status()
-            except requests.HTTPError as e:
-                body = ""
-                try:
-                    body = r.text[:1000]
-                except Exception:
-                    pass
-                raise RuntimeError(f"{e}; response body: {body}") from e
-            for line in r.iter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                if data.get("error"):
-                    raise RuntimeError(data["error"])
-                if data.get("response"):
-                    chunks.append(data["response"])
-                if data.get("thinking"):
-                    thinking_chunks += 1
-                if data.get("done"):
-                    done_reason = data.get("done_reason", "")
-                    break
-        response = "".join(chunks).strip()
-        if not response:
-            detail = f"thinking chunks: {thinking_chunks}"
-            if done_reason:
-                detail += f", done_reason: {done_reason}"
-            print(f"  [WARN] Ollama model {model} returned no response text ({detail}).")
-            return None
-        return response
-    except Exception as e:
-        print(f"  [WARN] Ollama call with model {model} failed: {e}")
-        return None
-
-
-def call_ollama_with_fallback(prompt: str) -> str:
-    models = _configured_ollama_models()
-    for index, model in enumerate(models, 1):
-        prefix = "Calling" if index == 1 else "Falling back to"
-        print(f"  {prefix} Ollama ({model}) ...")
-        response = _call_ollama(prompt, model)
-        if response:
-            return response
-
-        if "cloud" in model or "gpt-oss" in model:
-            retry_budget = max(OLLAMA_NUM_PREDICT * 2, 24000)
-            final_only_prompt = (
-                "Return the final answer only. Do not spend output budget on analysis, "
-                "reasoning traces, or thinking text. Start the requested response immediately.\n\n"
-                + prompt
-            )
-            print(f"  Retrying {model} with a larger final-answer budget ({retry_budget}) ...")
-            response = _call_ollama(final_only_prompt, model, num_predict=retry_budget)
-            if response:
-                return response
-    raise RuntimeError(f"All Ollama models failed: {', '.join(models)}")
-
-
 def _chunk_notes_cache_dir(year: int | str, month: int | None, output_key: str | None = None) -> Path:
     key = output_key or _month_key(int(year), int(month))
     return CHUNK_NOTES_DIR / key
@@ -1260,7 +1146,7 @@ def _summarize_large_content(
 
         print(f"    [{index}/{len(chunks)}] Summarizing chunk ({len(chunk.split())} words)")
         prompt = _chunk_summary_prompt(chunk, month_name, year, index, len(chunks))
-        note = call_ollama_with_fallback(prompt)
+        note = call_llm(prompt)
         note = _truncate_to_words(clean_summary_markdown(note), CHUNK_SUMMARY_WORDS)
         _save_chunk_note(cache_path, content_hash, note)
         notes.append(note)
@@ -1328,7 +1214,7 @@ def _condense_source(
             continue
         print(f"    [{index}/{len(chunks)}] condensing ({len(chunk.split())} words)")
         prompt = _neutral_source_chunk_prompt(label, chunk, index, len(chunks), period_label)
-        note = _truncate_to_words(clean_summary_markdown(call_ollama_with_fallback(prompt)), CHUNK_SUMMARY_WORDS)
+        note = _truncate_to_words(clean_summary_markdown(call_llm(prompt)), CHUNK_SUMMARY_WORDS)
         _save_chunk_note(cpath, content_hash, note)
         notes.append(note)
 
@@ -1404,7 +1290,7 @@ def prepare_prompt_content(
 
 
 def split_response(response: str) -> tuple[str, str]:
-    """Split Ollama response into (summary, questions) at PART 2."""
+    """Split LLM response into (summary, questions) at PART 2."""
     marker_re = re.compile(r"#{0,6}\s*PART\s*2", re.IGNORECASE)
     m = marker_re.search(response)
     if m:
@@ -1494,7 +1380,7 @@ def parse_questions(raw: str) -> list[dict]:
 def normalize_questions(questions: list[dict]) -> list[dict]:
     if len(questions) > EXPECTED_QUESTION_COUNT:
         print(
-            f"  [WARN] Ollama generated {len(questions)} MCQs; "
+            f"  [WARN] LLM generated {len(questions)} MCQs; "
             f"keeping the first {EXPECTED_QUESTION_COUNT}."
         )
         questions = questions[:EXPECTED_QUESTION_COUNT]
@@ -1572,7 +1458,7 @@ def complete_missing_questions(
 
     start_number = len(questions) + 1
     print(
-        f"  [WARN] Ollama generated {len(questions)} of {EXPECTED_QUESTION_COUNT} MCQs. "
+        f"  [WARN] LLM generated {len(questions)} of {EXPECTED_QUESTION_COUNT} MCQs. "
         f"Requesting Q{start_number}-Q{EXPECTED_QUESTION_COUNT} only ..."
     )
     continuation_prompt = build_missing_questions_prompt(
@@ -1583,11 +1469,11 @@ def complete_missing_questions(
         start_number,
         EXPECTED_QUESTION_COUNT,
     )
-    continuation = call_ollama_with_fallback(continuation_prompt)
-    continuation_path = _save_raw_ollama_response(
+    continuation = call_llm(continuation_prompt)
+    continuation_path = _save_raw_llm_response(
         year, month, continuation, "continuation", output_key
     )
-    print(f"  Raw Ollama continuation saved → {continuation_path}")
+    print(f"  Raw LLM continuation saved → {continuation_path}")
 
     extra_questions = parse_questions(continuation)
     needed = EXPECTED_QUESTION_COUNT - len(questions)
@@ -1994,17 +1880,17 @@ def _run_week_exam(
     print("\n[Step 2] Preparing prompt content ...")
     combined = _prepare_prompt_content_exam(cfg, source_items, period_name, output_key)
 
-    print("\n[Step 3] Building prompt & calling Ollama ...")
+    print("\n[Step 3] Building prompt & calling Claude ...")
     t3 = time.time()
     # Weekly papers are built from the week's current-affairs material ONLY.
     # Static sources (Economic Survey — yearly) are intentionally kept separate:
     # they get their own stored summary + dedicated quiz (see pipeline/
     # static_runner.py), so weekly questions never mix with foundational ES facts.
     prompt = build_prompt(combined, period_name, exam=exam)
-    response = call_ollama_with_fallback(prompt)
-    print(f"  Ollama response: {len(response)} chars  ({time.time()-t3:.1f}s)")
+    response = call_llm(prompt)
+    print(f"  LLM response: {len(response)} chars  ({time.time()-t3:.1f}s)")
     raw_key = f"{cfg['slug']}-{output_key}"
-    _save_raw_ollama_response(None, None, response, output_key=raw_key)
+    _save_raw_llm_response(None, None, response, output_key=raw_key)
 
     print("\n[Step 4] Parsing response ...")
     summary, questions_raw = split_response(response)
@@ -2122,18 +2008,18 @@ def run_day(day: int, refresh_cache: bool = False, email_to: str | None = None) 
     )
     combined = prepare_prompt_content(pib_releases, rbi_items, month_name, year, month)
 
-    # Step 3: Build prompt then call Ollama
-    print("\n[Step 3] Building prompt & calling Ollama ...")
+    # Step 3: Build prompt then call Claude
+    print("\n[Step 3] Building prompt & calling Claude ...")
     t3 = time.time()
 
     # FIX 3 — build_prompt called HERE where content/month_name/year all exist.
     #          No .format() needed — build_prompt returns the complete ready string.
     prompt = build_prompt(combined, month_name, year)
 
-    response = call_ollama_with_fallback(prompt)
-    print(f"  Ollama response: {len(response)} chars  ({time.time()-t3:.1f}s)")
-    raw_response_path = _save_raw_ollama_response(year, month, response)
-    print(f"  Raw Ollama response saved → {raw_response_path}")
+    response = call_llm(prompt)
+    print(f"  LLM response: {len(response)} chars  ({time.time()-t3:.1f}s)")
+    raw_response_path = _save_raw_llm_response(year, month, response)
+    print(f"  Raw LLM response saved → {raw_response_path}")
 
     # Step 4: Split response
     print("\n[Step 4] Parsing response ...")
@@ -2246,14 +2132,14 @@ def run_week(
         output_key,
     )
 
-    print("\n[Step 3] Building prompt & calling Ollama ...")
+    print("\n[Step 3] Building prompt & calling Claude ...")
     t3 = time.time()
     prompt = build_prompt(combined, period_name)
 
-    response = call_ollama_with_fallback(prompt)
-    print(f"  Ollama response: {len(response)} chars  ({time.time()-t3:.1f}s)")
-    raw_response_path = _save_raw_ollama_response(None, None, response, output_key=output_key)
-    print(f"  Raw Ollama response saved → {raw_response_path}")
+    response = call_llm(prompt)
+    print(f"  LLM response: {len(response)} chars  ({time.time()-t3:.1f}s)")
+    raw_response_path = _save_raw_llm_response(None, None, response, output_key=output_key)
+    print(f"  Raw LLM response saved → {raw_response_path}")
 
     print("\n[Step 4] Parsing response ...")
     summary, questions_raw = split_response(response)

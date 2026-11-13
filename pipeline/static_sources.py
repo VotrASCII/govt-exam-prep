@@ -11,7 +11,7 @@ so a fact can never be asked twice — and the weekly prompt is told to build a
 small fixed quota of questions from that week's segments, folded into the normal
 topic distribution (they replace, not add to, current-affairs questions).
 
-This module is pure storage/selection logic (no Ollama). `static_runner.py`
+This module is pure storage/selection logic (no LLM). `static_runner.py`
 produces the segments; `daily_runner.py` consumes them per week.
 
 Segment schema (one dict):

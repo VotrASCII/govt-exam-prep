@@ -1,18 +1,20 @@
 from datetime import date as _date, timedelta as _timedelta
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL_PRIMARY = "gpt-oss:20b-cloud"
-OLLAMA_MODEL_FALLBACK = "qwen3.5:2b"
-OLLAMA_MODELS = [
-    OLLAMA_MODEL_PRIMARY,
-    OLLAMA_MODEL_FALLBACK,
-    "qwen3.5:0.8b",
-]
-OLLAMA_CONNECT_TIMEOUT_SECONDS = 10
-OLLAMA_READ_TIMEOUT_SECONDS = 180
-OLLAMA_NUM_CTX = 1024 * 64
-OLLAMA_NUM_PREDICT = 1024 * 24
-OLLAMA_DISABLE_THINKING = False
+# LLM backend: Claude via the local `claude` CLI (see pipeline/llm.py). Replaced Ollama.
+CLAUDE_MODEL = "sonnet"          # alias -> latest Sonnet
+CLAUDE_EFFORT = "high"
+CLAUDE_TIMEOUT_SECONDS = 1800    # per call; large map-reduce chunks can be slow
+CLAUDE_MAX_ATTEMPTS = 3
+CLAUDE_SYSTEM_PROMPT = (
+    "You are an expert assistant helping a student prepare for Indian government "
+    "competitive exams (RBI Grade B, UPSC, Banking, etc.) General Awareness. "
+    "Be accurate, concise and exam-focused. Follow the requested output format exactly "
+    "and return only the requested content."
+)
+# Budget used to size map-reduce chunks. Kept at the old value so existing content-hash
+# chunk caches (data/chunk_notes) still hit; Sonnet could take far more, but changing it
+# would re-condense everything.
+LLM_CONTEXT_TOKENS = 1024 * 64
 
 DAY_MAP = {
     1:  (2025, 5),   2:  (2025, 6),   3:  (2025, 7),   4:  (2025, 8),
@@ -67,7 +69,7 @@ NEWS_FEEDS = {
 }
 
 # Exams each news item is screened against, with keyword hints used for the
-# heuristic fallback tagger (the LLM refines these when Ollama is available).
+# heuristic fallback tagger (the LLM refines these when the claude CLI is available).
 NEWS_EXAMS = {
     "RBI Grade B": [
         "rbi", "monetary policy", "repo rate", "inflation", "cpi", "wpi", "gdp",
